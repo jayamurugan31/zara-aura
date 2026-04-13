@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import re
 from collections import defaultdict
 from dataclasses import dataclass
 
@@ -10,58 +9,28 @@ from langdetect import DetectorFactory, LangDetectException, detect_langs
 DetectorFactory.seed = 0
 
 
+_SUPPORTED_LANGUAGE_CODES: set[str] = {
+    "en",
+    "hi",
+    "ta",
+    "te",
+    "ml",
+}
+
+
 _LANGUAGE_NAMES: dict[str, str] = {
-    "as": "Assamese",
-    "ar": "Arabic",
-    "bn": "Bengali",
-    "cs": "Czech",
-    "da": "Danish",
-    "de": "German",
-    "el": "Greek",
     "en": "English",
-    "es": "Spanish",
-    "fa": "Persian",
-    "fi": "Finnish",
-    "fr": "French",
-    "he": "Hebrew",
     "hi": "Hindi",
-    "id": "Indonesian",
-    "it": "Italian",
-    "ja": "Japanese",
-    "kn": "Kannada",
-    "ko": "Korean",
     "ml": "Malayalam",
-    "mr": "Marathi",
-    "ne": "Nepali",
-    "nl": "Dutch",
-    "no": "Norwegian",
-    "or": "Odia",
-    "pa": "Punjabi",
-    "pl": "Polish",
-    "pt": "Portuguese",
-    "ro": "Romanian",
-    "ru": "Russian",
-    "sv": "Swedish",
     "ta": "Tamil",
     "te": "Telugu",
-    "th": "Thai",
-    "tr": "Turkish",
-    "uk": "Ukrainian",
-    "ur": "Urdu",
-    "vi": "Vietnamese",
-    "zh": "Chinese",
 }
 
 
 _SCRIPT_BUCKETS: dict[str, tuple[tuple[int, int], ...]] = {
-    "deva": ((0x0900, 0x097F),),  # Hindi/Marathi/Nepali and related Devanagari languages
-    "bn": ((0x0980, 0x09FF),),
-    "pa": ((0x0A00, 0x0A7F),),
-    "gu": ((0x0A80, 0x0AFF),),
-    "or": ((0x0B00, 0x0B7F),),
+    "deva": ((0x0900, 0x097F),),  # Hindi Devanagari
     "ta": ((0x0B80, 0x0BFF),),
     "te": ((0x0C00, 0x0C7F),),
-    "kn": ((0x0C80, 0x0CFF),),
     "ml": ((0x0D00, 0x0D7F),),
 }
 
@@ -76,6 +45,12 @@ _TRANSLIT_HINTS: dict[str, tuple[str, ...]] = {
         "irukk",
         "irukken",
         "saptiya",
+        "thira",
+        "thirakka",
+        "pannu",
+        "niruthu",
+        "venum",
+        "inga",
     ),
     "te": (
         "namaskaram",
@@ -86,13 +61,12 @@ _TRANSLIT_HINTS: dict[str, tuple[str, ...]] = {
         "ela unnaru",
         "bagunn",
         "avuna",
-    ),
-    "kn": (
-        "namaskara",
-        "hegiddira",
-        "nanu",
-        "neevu",
-        "chennagide",
+        "chey",
+        "cheyyi",
+        "aapu",
+        "ippudu",
+        "kavali",
+        "vinali",
     ),
     "ml": (
         "namaskaram",
@@ -100,6 +74,12 @@ _TRANSLIT_HINTS: dict[str, tuple[str, ...]] = {
         "njan",
         "ningal",
         "enthaanu",
+        "cheyyu",
+        "nirthu",
+        "venam",
+        "thudangu",
+        "kelkku",
+        "ennu",
     ),
     "hi": (
         "namaste",
@@ -107,36 +87,17 @@ _TRANSLIT_HINTS: dict[str, tuple[str, ...]] = {
         "aap",
         "mujhe",
         "kya",
-    ),
-    "mr": (
-        "namaskar",
-        "tumhi",
-        "kasa",
-        "ahe",
-        "majha",
-    ),
-    "bn": (
-        "nomoskar",
-        "kemon",
-        "ami",
-        "tumi",
-    ),
-    "gu": (
-        "kem cho",
-        "majama",
-        "shu",
-    ),
-    "pa": (
-        "sat sri akal",
-        "tusi",
+        "karo",
+        "chalu",
+        "band",
+        "suno",
+        "kripya",
     ),
 }
 
 
 _DEVANAGARI_HINTS: dict[str, tuple[str, ...]] = {
-    "mr": ("आहे", "तुम्ही", "काय", "मला", "आणि"),
-    "ne": ("तपाईं", "छ", "हुन्छ", "हो", "र"),
-    "hi": ("है", "क्या", "आप", "मैं", "और"),
+    "hi": ("है", "क्या", "आप", "मैं", "और", "करो", "चालू", "बंद", "सुनो"),
 }
 
 
@@ -156,10 +117,12 @@ class LanguageService:
             return self._fallback()
 
         script_code, script_ratio = self._detect_script_hint(normalized)
-        if script_code and script_ratio >= 0.72:
+        script_char_count = self._count_script_chars(normalized, script_code) if script_code else 0
+        if script_code and (script_ratio >= 0.22 or script_char_count >= 3):
             if script_code == "deva":
                 script_code = self._resolve_devanagari_language(normalized)
-            return self._build_result(script_code, min(0.99, 0.65 + script_ratio / 2.0))
+            if script_code in _SUPPORTED_LANGUAGE_CODES:
+                return self._build_result(script_code, min(0.99, 0.65 + script_ratio / 2.0))
 
         score_board: dict[str, float] = defaultdict(float)
 
@@ -195,14 +158,26 @@ class LanguageService:
         return self._build_result(code, confidence)
 
     def _pick_best(self, scores: dict[str, float]) -> tuple[str, float]:
-        best_code, best_score = max(scores.items(), key=lambda item: item[1])
+        supported_scores: dict[str, float] = defaultdict(float)
+        for code, score in scores.items():
+            normalized_code = self._normalize_code(code)
+            if normalized_code in _SUPPORTED_LANGUAGE_CODES:
+                supported_scores[normalized_code] += score
+
+        if not supported_scores:
+            return "en", 0.0
+
+        best_code, best_score = max(supported_scores.items(), key=lambda item: item[1])
         clamped = max(0.0, min(1.0, best_score))
         return best_code, clamped
 
     def _build_result(self, code: str, confidence: float) -> LanguageDetectionResult:
         normalized_code = self._normalize_code(code)
+        if normalized_code not in _SUPPORTED_LANGUAGE_CODES:
+            return self._fallback()
         name = _LANGUAGE_NAMES.get(normalized_code, normalized_code)
-        return LanguageDetectionResult(code=normalized_code, name=name, confidence=confidence)
+        clamped_confidence = max(0.0, min(1.0, confidence))
+        return LanguageDetectionResult(code=normalized_code, name=name, confidence=clamped_confidence)
 
     def _detect_script_hint(self, text: str) -> tuple[str | None, float]:
         total_letters = 0
@@ -225,6 +200,22 @@ class LanguageService:
 
         best_script, count = max(script_counts.items(), key=lambda item: item[1])
         return best_script, count / total_letters
+
+    def _count_script_chars(self, text: str, script_code: str) -> int:
+        ranges = _SCRIPT_BUCKETS.get(script_code)
+        if not ranges:
+            return 0
+
+        count = 0
+        for char in text:
+            if not char.isalpha():
+                continue
+
+            code_point = ord(char)
+            if any(start <= code_point <= end for start, end in ranges):
+                count += 1
+
+        return count
 
     def _detect_transliteration_hint(self, text: str) -> tuple[str | None, int]:
         lowered = text.lower()
@@ -278,16 +269,11 @@ class LanguageService:
     def _normalize_code(self, code: str) -> str:
         lowered = code.strip().lower()
         aliases = {
-            "zh-cn": "zh",
-            "zh-tw": "zh",
-            "pt-br": "pt",
-            "pt-pt": "pt",
             "en-us": "en",
             "en-gb": "en",
-            "ori": "or",
-            "od": "or",
             "gom": "hi",
             "mai": "hi",
+            "bho": "hi",
         }
         return aliases.get(lowered, lowered)
 

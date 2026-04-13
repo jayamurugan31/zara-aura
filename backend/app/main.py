@@ -9,14 +9,15 @@ import httpx
 from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, Request, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
+from fastapi.responses import Response
 
 from app.config import settings
-from app.schemas import AudioFeatures, ChatRequest, ChatResponse, ModeLiteral, ModeRequest, ModeResponse, VoiceResponse
+from app.schemas import AudioFeatures, ChatRequest, ChatResponse, ModeLiteral, ModeRequest, ModeResponse, TTSRequest, VoiceResponse
 from app.services.ai_router import AIRouterService
 from app.services.audio_features import AudioFeatureResult, AudioFeatureService
 from app.services.automation import AutomationEngine
 from app.services.emotion_service import EmotionService
-from app.services.language_service import LanguageService
+from app.services.language_service import LanguageDetectionResult, LanguageService
 from app.services.memory import MemoryStore
 from app.services.mcp_service import MCPService
 from app.services.mode_state import ModeState
@@ -27,6 +28,65 @@ from app.services.whisper_service import WhisperService
 
 
 logger = logging.getLogger(__name__)
+
+
+_SUPPORTED_RESPONSE_LANGUAGE_NAMES: dict[str, str] = {
+    "en": "English",
+    "hi": "Hindi",
+    "ta": "Tamil",
+    "te": "Telugu",
+    "ml": "Malayalam",
+}
+
+
+def _normalize_preferred_language(language: str | None) -> str | None:
+    if not language:
+        return None
+
+    lowered = language.strip().lower()
+    aliases = {
+        "en": "en",
+        "en-us": "en",
+        "en-gb": "en",
+        "english": "en",
+        "hi": "hi",
+        "hi-in": "hi",
+        "hindi": "hi",
+        "ta": "ta",
+        "ta-in": "ta",
+        "tamil": "ta",
+        "te": "te",
+        "te-in": "te",
+        "telugu": "te",
+        "ml": "ml",
+        "ml-in": "ml",
+        "malayalam": "ml",
+    }
+
+    normalized = aliases.get(lowered, lowered)
+    return normalized if normalized in _SUPPORTED_RESPONSE_LANGUAGE_NAMES else None
+
+
+def _resolve_response_language(
+    detected: LanguageDetectionResult,
+    preferred_code: str | None,
+) -> LanguageDetectionResult:
+    if not preferred_code:
+        return detected
+
+    if detected.code == preferred_code:
+        return detected
+
+    # In mixed commands like "Telugu + English query", detector can skew to English.
+    # Prefer user-selected language when confidence is low or detected language falls back to English.
+    if detected.code == "en" or detected.confidence < 0.78:
+        return LanguageDetectionResult(
+            code=preferred_code,
+            name=_SUPPORTED_RESPONSE_LANGUAGE_NAMES[preferred_code],
+            confidence=max(0.8, detected.confidence),
+        )
+
+    return detected
 
 
 @dataclass(slots=True)
@@ -123,10 +183,23 @@ async def set_mode(payload: ModeRequest, request: Request) -> ModeResponse:
     return ModeResponse(mode=updated_mode)
 
 
+@app.post("/tts")
+async def tts(payload: TTSRequest, request: Request) -> Response:
+    services = get_services(request)
+    synthesis = await services.tts_service.synthesize_bytes(payload.text, payload.language)
+    if synthesis is None:
+        raise HTTPException(status_code=503, detail="TTS is unavailable")
+
+    audio_bytes, media_type = synthesis
+    return Response(content=audio_bytes, media_type=media_type)
+
+
 @app.post("/chat", response_model=ChatResponse)
 async def chat(payload: ChatRequest, background_tasks: BackgroundTasks, request: Request) -> ChatResponse:
     services = get_services(request)
     detected_language = services.language_service.detect(payload.text)
+    preferred_language_code = _normalize_preferred_language(payload.preferred_language)
+    response_language = _resolve_response_language(detected_language, preferred_language_code)
 
     effective_mode: ModeLiteral = payload.mode or await services.mode_state.get_mode()
     history = await services.memory_store.get_messages()
@@ -135,10 +208,10 @@ async def chat(payload: ChatRequest, background_tasks: BackgroundTasks, request:
         text=payload.text,
         mode=effective_mode,
         history=history,
-        response_language=detected_language.name,
+        response_language=response_language.name,
     )
 
-    action = await services.automation_engine.detect_and_execute(payload.text, language_code=detected_language.code)
+    action = await services.automation_engine.detect_and_execute(payload.text, language_code=response_language.code)
 
     volume = float(payload.volume or 0.0)
     pitch = round(110.0 + (volume * 220.0), 1)
@@ -151,7 +224,7 @@ async def chat(payload: ChatRequest, background_tasks: BackgroundTasks, request:
 
     return ChatResponse(
         text=response_text,
-        language=detected_language.code,
+        language=response_language.code,
         emotion=emotion,
         audio_features=AudioFeatures(volume=round(volume, 3), pitch=pitch),
         action=action,
@@ -164,6 +237,7 @@ async def voice(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     mode: ModeLiteral | None = Form(default=None),
+    preferred_language: str | None = Form(default=None),
     synthesize: bool = Form(default=False),
 ) -> VoiceResponse:
     services = get_services(request)
@@ -197,6 +271,8 @@ async def voice(
         raise HTTPException(status_code=422, detail="Could not detect speech in the provided audio")
 
     detected_language = services.language_service.detect(transcript)
+    preferred_language_code = _normalize_preferred_language(preferred_language)
+    response_language = _resolve_response_language(detected_language, preferred_language_code)
 
     effective_mode: ModeLiteral = mode or await services.mode_state.get_mode()
     history = await services.memory_store.get_messages()
@@ -205,10 +281,10 @@ async def voice(
         text=transcript,
         mode=effective_mode,
         history=history,
-        response_language=detected_language.name,
+        response_language=response_language.name,
     )
 
-    action = await services.automation_engine.detect_and_execute(transcript, language_code=detected_language.code)
+    action = await services.automation_engine.detect_and_execute(transcript, language_code=response_language.code)
     emotion = services.emotion_service.detect(transcript, audio_features.volume)
 
     await services.memory_store.add_turn(transcript, response_text)
@@ -219,7 +295,7 @@ async def voice(
     return VoiceResponse(
         transcript=transcript,
         text=response_text,
-        language=detected_language.code,
+        language=response_language.code,
         emotion=emotion,
         audio_features=AudioFeatures(
             volume=audio_features.volume,

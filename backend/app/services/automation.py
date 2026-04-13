@@ -4,6 +4,7 @@ import asyncio
 import datetime as dt
 import re
 import urllib.parse
+import urllib.request
 import webbrowser
 from typing import TYPE_CHECKING, Any
 
@@ -16,8 +17,113 @@ if TYPE_CHECKING:
 class AutomationEngine:
     """Safe rule-based automation. No arbitrary command execution."""
 
+    COMMAND_REPLACEMENTS: tuple[tuple[str, str], ...] = (
+        # Engine intent phrases
+        ("engine chalu karo", "turn on engine"),
+        ("इंजन चालू करो", "turn on engine"),
+        ("எஞ்சின் ஆன் பண்ணு", "turn on engine"),
+        ("engine on pannu", "turn on engine"),
+        ("ఇంజిన్ ఆన్ చేయి", "turn on engine"),
+        ("engine on chey", "turn on engine"),
+        ("എഞ്ചിൻ ഓൺ ആക്കു", "turn on engine"),
+        ("engine on aakku", "turn on engine"),
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+        
+        ("engine band karo", "turn off engine"),
+        ("इंजन बंद करो", "turn off engine"),
+        ("எஞ்சின் ஆஃப் பண்ணு", "turn off engine"),
+        ("engine off pannu", "turn off engine"),
+        ("ఇంజిన్ ఆఫ్ చేయి", "turn off engine"),
+        ("engine off chey", "turn off engine"),
+        ("എഞ്ചിൻ ഓഫ് ആക്കു", "turn off engine"),
+        ("engine off aakku", "turn off engine"),
+        # Platform names
+        ("यूट्यूब", "youtube"),
+        ("யூடியூப்", "youtube"),
+        ("యూట్యూబ్", "youtube"),
+        ("യൂട്യൂബ്", "youtube"),
+        ("स्पॉटिफाई", "spotify"),
+        ("ஸ்பாட்டிஃபை", "spotify"),
+        ("స్పాటిఫై", "spotify"),
+        ("സ്പോട്ടിഫൈ", "spotify"),
+        ("गूगल मैप्स", "google maps"),
+        ("கூகுள் மேப்ஸ்", "google maps"),
+        ("గూగుల్ మ్యాప్స్", "google maps"),
+        ("ഗൂഗിൾ മാപ്സ്", "google maps"),
+        ("जीमेल", "gmail"),
+        ("ஜிமெயில்", "gmail"),
+        ("జిమెయిల్", "gmail"),
+        ("ജിമെയിൽ", "gmail"),
+        ("गूगल", "google"),
+        ("கூகுள்", "google"),
+        ("గూగుల్", "google"),
+        ("ഗൂഗിൾ", "google"),
+        ("गिटहब", "github"),
+        ("கிட்ஹப்", "github"),
+        ("గిట్ హబ్", "github"),
+        ("ഗിറ്റ്ഹബ്", "github"),
+        # Core verbs
+        ("खोल दो", "open"),
+        ("खोलो", "open"),
+        ("खोल", "open"),
+        ("khol do", "open"),
+        ("kholo", "open"),
+        ("khol", "open"),
+        ("திறக்க", "open"),
+        ("திற", "open"),
+        ("thirakka", "open"),
+        ("thira", "open"),
+        ("తెరవండి", "open"),
+        ("తెరవు", "open"),
+        ("తెరువు", "open"),
+        ("ఓపెన్ చేయి", "open"),
+        ("open చేయి", "open"),
+        ("ఓపెన్", "open"),
+        ("teravandi", "open"),
+        ("teruvu", "open"),
+        ("തുറക്കൂ", "open"),
+        ("തുറക്ക", "open"),
+        ("തുറ", "open"),
+        ("thurakku", "open"),
+        ("चलाओ", "play"),
+        ("बजाओ", "play"),
+        ("ப்ளே", "play"),
+        ("play pannu", "play"),
+        ("ప్లే", "play"),
+        ("play chey", "play"),
+        ("കളി", "play"),
+        ("play cheyyu", "play"),
+        ("ढूंढो", "search"),
+        ("खोजो", "search"),
+        ("தேடு", "search"),
+        ("தேட", "search"),
+        ("வெதுக்கு", "search"),
+        ("வெச்சு பார்", "search"),
+        ("వెతుకు", "search"),
+        ("వెతకండి", "search"),
+        ("തിരയൂ", "search"),
+        ("തിരയു", "search"),
+        ("തേടു", "search"),
+    )
+
     YOUTUBE_RE = re.compile(
-        r"\b(open|launch|start|visit|go to)\s+(youtube|yt)\b|\b(youtube|yt)\s+(open|launch)\b|\b(abrir|abre)\s+youtube\b|\b(ouvrir|ouvre)\s+youtube\b",
+        r"\b(open|launch|start|visit|go to)\s+(youtube|yt)\b|\b(youtube|yt)\s+(open|launch)\b",
         re.IGNORECASE,
     )
     YOUTUBE_PLAY_RE = re.compile(
@@ -25,7 +131,7 @@ class AutomationEngine:
         re.IGNORECASE,
     )
     SPOTIFY_RE = re.compile(
-        r"\b(open|launch|start|visit)\s+spotify\b|\b(abrir|abre)\s+spotify\b|\b(ouvrir|ouvre)\s+spotify\b",
+        r"\b(open|launch|start|visit)\s+spotify\b",
         re.IGNORECASE,
     )
     SPOTIFY_PLAY_RE = re.compile(
@@ -45,15 +151,31 @@ class AutomationEngine:
     SEARCH_RE = re.compile(r"\b(search|find|look up)\s+(for\s+)?(?P<query>.+)", re.IGNORECASE)
     TIME_RE = re.compile(r"\b(what(?:'s| is)?\s+the\s+time|current\s+time)\b", re.IGNORECASE)
     DATE_RE = re.compile(r"\b(what(?:'s| is)?\s+the\s+date|today'?s\s+date)\b", re.IGNORECASE)
+    ENGINE_ON_RE = re.compile(
+        r"\b(turn|switch|set|enable)\s+on\s+(the\s+)?engine\b|\bstart\s+(the\s+)?engine\b|\bengine\s+on\b",
+        re.IGNORECASE,
+    )
+    ENGINE_OFF_RE = re.compile(
+        r"\b(turn|switch|set|disable)\s+off\s+(the\s+)?engine\b|\bstop\s+(the\s+)?engine\b|\bengine\s+off\b",
+        re.IGNORECASE,
+    )
 
     def __init__(self, settings: Settings, mcp_service: MCPService | None = None) -> None:
         self.settings = settings
         self.mcp_service = mcp_service
 
     async def detect_and_execute(self, text: str, language_code: str | None = None) -> dict[str, Any] | None:
-        normalized = text.strip()
+        normalized = self._canonicalize_command_text(text)
         if not normalized:
             return None
+
+        if self.ENGINE_ON_RE.search(normalized):
+            result = await self._trigger_engine(turn_on=True)
+            return self._with_language(result, language_code)
+
+        if self.ENGINE_OFF_RE.search(normalized):
+            result = await self._trigger_engine(turn_on=False)
+            return self._with_language(result, language_code)
 
         spotify_play_match = self.SPOTIFY_PLAY_RE.search(normalized)
         if spotify_play_match:
@@ -163,6 +285,43 @@ class AutomationEngine:
             )
 
         return None
+
+    def _canonicalize_command_text(self, text: str) -> str:
+        normalized = " ".join(text.strip().lower().split())
+        ordered_replacements = sorted(self.COMMAND_REPLACEMENTS, key=lambda item: len(item[0]), reverse=True)
+
+        for source, target in ordered_replacements:
+            normalized = normalized.replace(source, target)
+
+        return normalized
+
+    async def _trigger_engine(self, turn_on: bool) -> dict[str, Any]:
+        suffix = "on" if turn_on else "off"
+        url = f"http://10.133.52.233/{suffix}"
+        payload: dict[str, Any] = {
+            "type": "engine_on" if turn_on else "engine_off",
+            "status": "planned",
+            "target": url,
+            "intent": "Turn on engine" if turn_on else "Turn off engine",
+        }
+
+        if not self.settings.automation_execute:
+            return payload
+
+        def _send_request() -> None:
+            with urllib.request.urlopen(url, timeout=5) as response:
+                if response.status >= 400:
+                    raise RuntimeError(f"HTTP {response.status}")
+
+        try:
+            await asyncio.to_thread(_send_request)
+            payload["status"] = "executed"
+            payload["executor"] = "http_request"
+        except Exception as exc:
+            payload["status"] = "failed"
+            payload["error"] = str(exc)
+
+        return payload
 
     def _with_language(self, payload: dict[str, Any], language_code: str | None) -> dict[str, Any]:
         if language_code:

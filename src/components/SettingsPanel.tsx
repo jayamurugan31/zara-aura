@@ -313,9 +313,10 @@ const SettingsPanel = ({ open, settings, onOpenChange, onSettingsChange }: Setti
                     </SelectTrigger>
                     <SelectContent className="border-white/10 bg-black text-white">
                       <SelectItem value="en-US">English (US)</SelectItem>
-                      <SelectItem value="en-GB">English (UK)</SelectItem>
                       <SelectItem value="hi-IN">Hindi</SelectItem>
-                      <SelectItem value="ja-JP">Japanese</SelectItem>
+                      <SelectItem value="ta-IN">Tamil</SelectItem>
+                      <SelectItem value="te-IN">Telugu</SelectItem>
+                      <SelectItem value="ml-IN">Malayalam</SelectItem>
                     </SelectContent>
                   </Select>
                 </SettingRow>

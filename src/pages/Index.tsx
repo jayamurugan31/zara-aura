@@ -5,7 +5,7 @@ import MicButton from "@/components/MicButton";
 import SettingsPanel from "@/components/SettingsPanel";
 import TopBar from "@/components/TopBar";
 import { defaultSettings, orbPaletteHues, type VoicePersona, type ZaraSettings } from "@/lib/settings";
-import { sendVoiceChunk, syncBackendMode, type BackendAction, type BackendEmotion } from "@/lib/backend";
+import { fetchTtsAudio, sendVoiceChunk, syncBackendMode, type BackendAction, type BackendEmotion } from "@/lib/backend";
 
 type OrbState = "idle" | "listening" | "thinking" | "speaking";
 
@@ -29,49 +29,182 @@ function truncate(text: string, maxLength: number) {
 }
 
 function normalizeSpeechLanguageTag(language: string | undefined, fallback: string): string {
+  const baseCodeMap: Record<string, string> = {
+    en: "en-US",
+    hi: "hi-IN",
+    ta: "ta-IN",
+    te: "te-IN",
+    ml: "ml-IN",
+  };
+
+  const fallbackCode = fallback.trim().toLowerCase().split("-")[0];
+  const resolvedFallback = baseCodeMap[fallbackCode] ?? "en-US";
+
   if (!language) {
-    return fallback;
+    return resolvedFallback;
   }
 
   const lowered = language.trim().toLowerCase();
   if (!lowered) {
-    return fallback;
+    return resolvedFallback;
   }
 
-  if (lowered.includes("-")) {
-    return lowered;
+  const loweredCode = lowered.split("-")[0];
+  return baseCodeMap[loweredCode] ?? resolvedFallback;
+}
+
+type SupportedLanguageCode = "en" | "hi" | "ta" | "te" | "ml";
+
+function toSupportedLanguageCode(language: string | undefined): SupportedLanguageCode {
+  const code = (language ?? "").trim().toLowerCase().split("-")[0];
+  if (code === "hi" || code === "ta" || code === "te" || code === "ml") {
+    return code;
+  }
+  return "en";
+}
+
+function localizeActionRuntimeHint(
+  language: string | undefined,
+  actionType: string,
+  actionStatus: string,
+  detail?: string,
+): string {
+  const code = toSupportedLanguageCode(language);
+
+  if (code === "hi") {
+    if (actionStatus === "executed" || actionStatus === "executed_fallback") {
+      return `${actionType} कमांड पूरा हुआ`;
+    }
+    if (actionStatus === "failed") {
+      return detail ? `${actionType} कमांड विफल: ${detail}` : `${actionType} कमांड विफल`;
+    }
+    if (actionStatus === "blocked_popup") {
+      return `${actionType} कमांड ब्राउज़र पॉपअप सेटिंग से ब्लॉक हुआ`;
+    }
+    return `${actionType} कमांड स्थिति: ${actionStatus}`;
   }
 
-  const codeMap: Record<string, string> = {
-    ar: "ar-SA",
-    as: "as-IN",
-    bn: "bn-IN",
-    de: "de-DE",
-    en: "en-US",
-    es: "es-ES",
-    fr: "fr-FR",
-    gu: "gu-IN",
-    hi: "hi-IN",
-    it: "it-IT",
-    ja: "ja-JP",
-    kn: "kn-IN",
-    ko: "ko-KR",
-    ml: "ml-IN",
-    mr: "mr-IN",
-    ne: "ne-NP",
-    or: "or-IN",
-    pa: "pa-IN",
-    nl: "nl-NL",
-    pt: "pt-BR",
-    ru: "ru-RU",
-    ta: "ta-IN",
-    te: "te-IN",
-    tr: "tr-TR",
-    ur: "ur-PK",
-    zh: "zh-CN",
-  };
+  if (code === "ta") {
+    if (actionStatus === "executed" || actionStatus === "executed_fallback") {
+      return `${actionType} கட்டளை செயல்படுத்தப்பட்டது`;
+    }
+    if (actionStatus === "failed") {
+      return detail ? `${actionType} கட்டளை தோல்வி: ${detail}` : `${actionType} கட்டளை தோல்வி`;
+    }
+    if (actionStatus === "blocked_popup") {
+      return `${actionType} கட்டளை ப்ரௌசர் பாப்அப் அமைப்பால் தடுக்கப்பட்டது`;
+    }
+    return `${actionType} கட்டளை நிலை: ${actionStatus}`;
+  }
 
-  return codeMap[lowered] ?? fallback;
+  if (code === "te") {
+    if (actionStatus === "executed" || actionStatus === "executed_fallback") {
+      return `${actionType} కమాండ్ అమలైంది`;
+    }
+    if (actionStatus === "failed") {
+      return detail ? `${actionType} కమాండ్ విఫలమైంది: ${detail}` : `${actionType} కమాండ్ విఫలమైంది`;
+    }
+    if (actionStatus === "blocked_popup") {
+      return `${actionType} కమాండ్ బ్రౌజర్ పాప్-అప్ సెట్టింగ్స్ వల్ల నిలిపివేయబడింది`;
+    }
+    return `${actionType} కమాండ్ స్థితి: ${actionStatus}`;
+  }
+
+  if (code === "ml") {
+    if (actionStatus === "executed" || actionStatus === "executed_fallback") {
+      return `${actionType} കമാൻഡ് നടപ്പാക്കി`;
+    }
+    if (actionStatus === "failed") {
+      return detail ? `${actionType} കമാൻഡ് പരാജയപ്പെട്ടു: ${detail}` : `${actionType} കമാൻഡ് പരാജയപ്പെട്ടു`;
+    }
+    if (actionStatus === "blocked_popup") {
+      return `${actionType} കമാൻഡ് ബ്രൗസർ പോപ്പ്-അപ്പ് ക്രമീകരണങ്ങൾ കാരണം തടഞ്ഞു`;
+    }
+    return `${actionType} കമാൻഡ് നില: ${actionStatus}`;
+  }
+
+  if (actionStatus === "executed" || actionStatus === "executed_fallback") {
+    return `Action ${actionType} executed`;
+  }
+  if (actionStatus === "failed") {
+    return detail ? `Action ${actionType} failed: ${detail}` : `Action ${actionType} failed`;
+  }
+  if (actionStatus === "blocked_popup") {
+    return `Action ${actionType} blocked by browser popup settings`;
+  }
+  return `Action ${actionType} ${actionStatus}`;
+}
+
+function localizeLoopStoppedHint(language: string | undefined): string {
+  const code = toSupportedLanguageCode(language);
+  if (code === "hi") {
+    return "लूप मोड बंद कर दिया गया";
+  }
+  if (code === "ta") {
+    return "லூப் மோடு நிறுத்தப்பட்டது";
+  }
+  if (code === "te") {
+    return "లూప్ మోడ్ ఆపబడింది";
+  }
+  if (code === "ml") {
+    return "ലൂപ്പ് മോഡ് നിർത്തി";
+  }
+  return "Loop mode stopped";
+}
+
+function localizeSpeechUnavailableHint(language: string | undefined): string {
+  const code = toSupportedLanguageCode(language);
+  if (code === "hi") {
+    return "आवाज़ नहीं चल पाई। लूप मोड रोका गया।";
+  }
+  if (code === "ta") {
+    return "குரல் வெளியீடு வரவில்லை. லூப் மோடு நிறுத்தப்பட்டது.";
+  }
+  if (code === "te") {
+    return "వాయిస్ ప్లే కాలేదు. లూప్ మోడ్ ఆపబడింది.";
+  }
+  if (code === "ml") {
+    return "ശബ്ദ ഔട്ട്‌പുട്ട് ലഭിച്ചില്ല. ലൂപ്പ് മോഡ് നിർത്തി.";
+  }
+  return "Voice output failed. Loop mode stopped.";
+}
+
+function shouldStopLoopFromTranscript(transcript: string): boolean {
+  const normalized = transcript.trim().toLowerCase().replace(/\s+/g, " ");
+  if (!normalized) {
+    return false;
+  }
+
+  const explicitStopPhrases = [
+    "stop loop",
+    "loop off",
+    "disable loop",
+    "stop listening",
+    "stop continuous",
+    "लूप बंद",
+    "लूप बंद करो",
+    "सुनना बंद",
+    "லூப் ஆஃப்",
+    "லூப் நிறுத்து",
+    "கேட்காதே",
+    "లూప్ ఆఫ్",
+    "లూప్ ఆపు",
+    "వినడం ఆపు",
+    "ലൂപ് ഓഫ്",
+    "ലൂപ് നിർത്തു",
+    "കേൾക്കൽ നിർത്തു",
+  ];
+
+  if (explicitStopPhrases.some((phrase) => normalized.includes(phrase))) {
+    return true;
+  }
+
+  const hasLoopContext =
+    /(loop|continuous|listen|listening|लूप|सुनना|லூப்|கேட்|లూప్|విన|ലൂപ്|കേൾക്ക)/.test(normalized);
+  const hasStopIntent =
+    /(stop|off|disable|pause|बंद|रोक|रुको|நிறுத்து|ஆஃப்|ஆப்|ఆపు|ఆఫ్|നിർത്തു|ഓഫ്|niruthu|aapu|nirthu|band)/.test(normalized);
+
+  return hasLoopContext && hasStopIntent;
 }
 
 function actionString(value: unknown): string | null {
@@ -164,6 +297,9 @@ const Index = () => {
   const processVoiceChunkRef = useRef<(audioChunk: Blob) => Promise<void>>(async () => undefined);
   const isProcessingRef = useRef(false);
   const mountedRef = useRef(true);
+  const continuousLoopRef = useRef(settings.ai.continuousLoop);
+  const previousLoopSettingRef = useRef(settings.ai.continuousLoop);
+  const ttsAudioRef = useRef<HTMLAudioElement | null>(null);
 
   const getPreferredVoice = useCallback(async (languageTag: string): Promise<SpeechSynthesisVoice | null> => {
     if (!("speechSynthesis" in window)) {
@@ -204,6 +340,17 @@ const Index = () => {
     }
   }, []);
 
+  const stopTtsAudio = useCallback(() => {
+    const current = ttsAudioRef.current;
+    if (!current) {
+      return;
+    }
+
+    current.pause();
+    current.currentTime = 0;
+    ttsAudioRef.current = null;
+  }, []);
+
   const releaseAudioStream = useCallback(() => {
     setOrbState("idle");
     streamRef.current?.getTracks().forEach((track) => track.stop());
@@ -212,7 +359,7 @@ const Index = () => {
   }, []);
 
   const handleAutomationAction = useCallback(
-    (action: BackendAction | null): string | null => {
+    (action: BackendAction | null, languageCode?: string): string | null => {
       if (!action) {
         return null;
       }
@@ -222,24 +369,25 @@ const Index = () => {
       const mcpTool = actionString(action.mcp_tool);
       const target = actionString(action.target) ?? actionString(action.mcp_url);
       const actionError = actionString(action.error);
+      const actionLanguage = actionString(action.language) ?? languageCode;
 
       if (actionStatus === "executed" || actionStatus === "executed_fallback") {
-        return `Action ${actionType} executed`;
+        return localizeActionRuntimeHint(actionLanguage, actionType, actionStatus);
       }
 
       if (actionStatus === "failed") {
-        return actionError ? `Action ${actionType} failed: ${actionError}` : `Action ${actionType} failed`;
+        return localizeActionRuntimeHint(actionLanguage, actionType, actionStatus, actionError ?? undefined);
       }
 
       if (settings.automation.routines && mcpTool === "open_url" && target && actionStatus === "planned") {
         const popup = window.open(target, "_blank", "noopener,noreferrer");
         if (popup) {
-          return `Action ${actionType} executed`;
+          return localizeActionRuntimeHint(actionLanguage, actionType, "executed");
         }
-        return `Action ${actionType} blocked by browser popup settings`;
+        return localizeActionRuntimeHint(actionLanguage, actionType, "blocked_popup");
       }
 
-      return `Action ${actionType} ${actionStatus}`;
+      return localizeActionRuntimeHint(actionLanguage, actionType, actionStatus);
     },
     [settings.automation.routines],
   );
@@ -259,6 +407,8 @@ const Index = () => {
         return;
       }
 
+      stopTtsAudio();
+      window.speechSynthesis?.cancel();
       clearLoopRestart();
       clearAutoStop();
 
@@ -311,16 +461,68 @@ const Index = () => {
         releaseAudioStream();
       }
     },
-    [clearAutoStop, clearLoopRestart, releaseAudioStream],
+    [clearAutoStop, clearLoopRestart, releaseAudioStream, stopTtsAudio],
   );
 
-  const speakResponse = useCallback(
-    async (text: string, spokenLanguage?: string) => {
-      if (!("speechSynthesis" in window) || !text.trim()) {
-        return;
+  const playBackendTts = useCallback(async (text: string, languageCode: SupportedLanguageCode): Promise<boolean> => {
+    try {
+      const audioBlob = await fetchTtsAudio(text, languageCode);
+      if (!audioBlob.size) {
+        return false;
       }
 
+      const objectUrl = URL.createObjectURL(audioBlob);
+      const audio = new Audio(objectUrl);
+      ttsAudioRef.current = audio;
+
+      return await new Promise<boolean>((resolve) => {
+        let finished = false;
+        const complete = (success: boolean) => {
+          if (finished) {
+            return;
+          }
+          finished = true;
+          audio.onended = null;
+          audio.onerror = null;
+          URL.revokeObjectURL(objectUrl);
+          if (ttsAudioRef.current === audio) {
+            ttsAudioRef.current = null;
+          }
+          resolve(success);
+        };
+
+        audio.onended = () => complete(true);
+        audio.onerror = () => complete(false);
+
+        const playPromise = audio.play();
+        if (playPromise) {
+          void playPromise.catch(() => complete(false));
+        }
+      });
+    } catch {
+      return false;
+    }
+  }, []);
+
+  const speakResponse = useCallback(
+    async (text: string, spokenLanguage?: string): Promise<boolean> => {
+      if (!text.trim()) {
+        return false;
+      }
+
+      stopTtsAudio();
       window.speechSynthesis.cancel();
+
+      const preferredCode = toSupportedLanguageCode(spokenLanguage ?? settings.voice.language);
+      const playedByBackend = await playBackendTts(text, preferredCode);
+      if (playedByBackend) {
+        return true;
+      }
+
+      if (!("speechSynthesis" in window)) {
+        return false;
+      }
+
       const resolvedLanguage = normalizeSpeechLanguageTag(spokenLanguage, settings.voice.language);
       const utterance = new SpeechSynthesisUtterance(text);
       utterance.lang = resolvedLanguage;
@@ -330,15 +532,27 @@ const Index = () => {
       const preferredVoice = await getPreferredVoice(resolvedLanguage);
       if (preferredVoice) {
         utterance.voice = preferredVoice;
+        utterance.lang = preferredVoice.lang || resolvedLanguage;
+      } else {
+        utterance.lang = "en-US";
       }
 
-      await new Promise<void>((resolve) => {
-        utterance.onend = () => resolve();
-        utterance.onerror = () => resolve();
+      const startedAt = Date.now();
+      const speechStatus = await new Promise<"ended" | "error">((resolve) => {
+        utterance.onend = () => resolve("ended");
+        utterance.onerror = () => resolve("error");
         window.speechSynthesis.speak(utterance);
       });
+
+      if (speechStatus === "error") {
+        return false;
+      }
+
+      const elapsedMs = Date.now() - startedAt;
+      const likelySilentPlayback = text.trim().length >= 10 && elapsedMs < 220;
+      return !likelySilentPlayback;
     },
-    [getPreferredVoice, settings.voice.language, settings.voice.persona, settings.voice.voiceSpeed],
+    [getPreferredVoice, playBackendTts, settings.voice.language, settings.voice.persona, settings.voice.voiceSpeed, stopTtsAudio],
   );
 
   const processVoiceChunk = useCallback(
@@ -349,7 +563,7 @@ const Index = () => {
       setRuntimeHint("Processing voice with ZARA backend...");
 
       try {
-        const response = await sendVoiceChunk(audioChunk, settings.ai.responseMode);
+        const response = await sendVoiceChunk(audioChunk, settings.ai.responseMode, settings.voice.language);
         if (!mountedRef.current) return;
 
         setAssistantText(response.text);
@@ -358,16 +572,45 @@ const Index = () => {
         setLastLanguage(response.language);
         setVoiceSignal(response.audio_features);
 
-        const actionRuntimeHint = handleAutomationAction(response.action);
-        if (actionRuntimeHint) {
+        const loopStopRequested = shouldStopLoopFromTranscript(response.transcript);
+        const wasLoopEnabled = continuousLoopRef.current;
+        if (loopStopRequested && wasLoopEnabled) {
+          continuousLoopRef.current = false;
+          setSettings((previous) => ({
+            ...previous,
+            ai: {
+              ...previous.ai,
+              continuousLoop: false,
+            },
+          }));
+        }
+
+        const actionRuntimeHint = handleAutomationAction(response.action, response.language);
+        if (loopStopRequested && wasLoopEnabled) {
+          setRuntimeHint(localizeLoopStoppedHint(response.language));
+        } else if (actionRuntimeHint) {
           setRuntimeHint(actionRuntimeHint);
         } else {
           setRuntimeHint("");
         }
 
         setOrbState("speaking");
-        await speakResponse(response.text, response.language);
-        shouldContinueLoop = true;
+        const didSpeak = await speakResponse(response.text, response.language);
+
+        if (!didSpeak && continuousLoopRef.current) {
+          continuousLoopRef.current = false;
+          setSettings((previous) => ({
+            ...previous,
+            ai: {
+              ...previous.ai,
+              continuousLoop: false,
+            },
+          }));
+          setRuntimeHint(localizeSpeechUnavailableHint(response.language));
+          void speakResponse("Voice output failed. Loop mode stopped.", "en");
+        }
+
+        shouldContinueLoop = didSpeak && !loopStopRequested;
       } catch (error) {
         if (!mountedRef.current) return;
 
@@ -379,7 +622,7 @@ const Index = () => {
         setOrbState("idle");
         setIsProcessing(false);
 
-        if (shouldContinueLoop && settings.ai.continuousLoop) {
+        if (shouldContinueLoop && continuousLoopRef.current) {
           setRuntimeHint("Continuous loop active...");
           clearLoopRestart();
           loopRestartTimerRef.current = window.setTimeout(() => {
@@ -394,7 +637,7 @@ const Index = () => {
         }
       }
     },
-    [clearLoopRestart, handleAutomationAction, settings.ai.continuousLoop, settings.ai.responseMode, speakResponse, startListening],
+    [clearLoopRestart, handleAutomationAction, settings.ai.responseMode, speakResponse, startListening],
   );
 
   useEffect(() => {
@@ -424,15 +667,35 @@ const Index = () => {
       releaseAudioStream();
       clearAutoStop();
       clearLoopRestart();
+      stopTtsAudio();
       window.speechSynthesis?.cancel();
     };
-  }, [clearAutoStop, clearLoopRestart, releaseAudioStream, stopRecording]);
+  }, [clearAutoStop, clearLoopRestart, releaseAudioStream, stopRecording, stopTtsAudio]);
 
   useEffect(() => {
-    if (!settings.ai.continuousLoop) {
+    const wasEnabled = previousLoopSettingRef.current;
+    const isEnabled = settings.ai.continuousLoop;
+
+    previousLoopSettingRef.current = isEnabled;
+    continuousLoopRef.current = isEnabled;
+
+    if (!isEnabled) {
       clearLoopRestart();
+      return;
     }
-  }, [clearLoopRestart, settings.ai.continuousLoop]);
+
+    const recorder = recorderRef.current;
+    const canAutoStart =
+      !wasEnabled &&
+      orbState === "idle" &&
+      !isProcessingRef.current &&
+      (!recorder || recorder.state === "inactive");
+
+    if (canAutoStart) {
+      setRuntimeHint("Continuous loop active...");
+      void startListening(true);
+    }
+  }, [clearLoopRestart, orbState, settings.ai.continuousLoop, startListening]);
 
   useEffect(() => {
     let active = true;
@@ -503,8 +766,20 @@ const Index = () => {
     }
 
     if (orbState === "listening") {
+      if (settings.ai.continuousLoop) {
+        continuousLoopRef.current = false;
+        setSettings((previous) => ({
+          ...previous,
+          ai: {
+            ...previous.ai,
+            continuousLoop: false,
+          },
+        }));
+        setRuntimeHint(localizeLoopStoppedHint(lastLanguage));
+      } else {
+        setRuntimeHint("Sending voice chunk...");
+      }
       setIsProcessing(true);
-      setRuntimeHint("Sending voice chunk...");
       stopRecording();
       return;
     }
@@ -512,6 +787,7 @@ const Index = () => {
     if (orbState !== "idle") {
       clearLoopRestart();
       clearAutoStop();
+      stopTtsAudio();
       window.speechSynthesis?.cancel();
       releaseAudioStream();
       setOrbState("idle");
@@ -521,7 +797,17 @@ const Index = () => {
     }
 
     await startListening(false);
-  }, [clearAutoStop, clearLoopRestart, orbState, releaseAudioStream, startListening, stopRecording]);
+  }, [
+    clearAutoStop,
+    clearLoopRestart,
+    lastLanguage,
+    orbState,
+    releaseAudioStream,
+    settings.ai.continuousLoop,
+    startListening,
+    stopTtsAudio,
+    stopRecording,
+  ]);
 
   return (
     <div className="relative flex min-h-screen select-none flex-col items-center justify-center overflow-hidden bg-black">

@@ -22,19 +22,26 @@ class OpenRouterClient:
         if not self.settings.openrouter_api_key:
             raise RuntimeError("OPENROUTER_API_KEY is not configured")
 
+        allowed_languages = "English, Hindi, Tamil, Telugu, Malayalam"
+
         if response_language:
             language_instruction = (
                 f"Detected user language: {response_language}. "
-                f"Reply in {response_language} unless the user explicitly asks for another language."
+                f"Reply only in {response_language}. "
+                f"Do not switch to any language outside: {allowed_languages}."
             )
         else:
-            language_instruction = "Detect the language of the latest user message and reply in that same language."
+            language_instruction = (
+                "Detect the latest user language and reply in the same language only if it is one of "
+                f"{allowed_languages}. For any other language, reply in English."
+            )
 
         system_prompt = (
             "You are ZARA AI, a warm and conversational voice-first assistant. "
             "Answer naturally in clear complete sentences, usually 2-5 sentences unless the user asks for brief output. "
             "Use recent conversation context to keep continuity and reason through follow-up questions. "
             f"{language_instruction} "
+            "Never say you cannot understand or speak English, Hindi, Tamil, Telugu, or Malayalam. "
             "Avoid one-word replies except for strict yes/no requests."
         )
 

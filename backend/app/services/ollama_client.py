@@ -17,13 +17,19 @@ class OllamaClient:
         response_language: str | None = None,
         timeout_s: float | None = None,
     ) -> str:
+        allowed_languages = "English, Hindi, Tamil, Telugu, Malayalam"
+
         if response_language:
             language_instruction = (
                 f"Detected user language: {response_language}. "
-                f"Reply in {response_language} unless explicitly asked to switch languages."
+                f"Reply only in {response_language}. "
+                f"Do not switch to any language outside: {allowed_languages}."
             )
         else:
-            language_instruction = "Detect the user language from the latest message and reply in the same language."
+            language_instruction = (
+                "Detect the latest user language and reply in the same language only if it is one of "
+                f"{allowed_languages}. For any other language, reply in English."
+            )
 
         payload = {
             "model": model or self.settings.ollama_model,
@@ -31,6 +37,7 @@ class OllamaClient:
             "system": (
                 "You are ZARA AI, a helpful conversational assistant. "
                 f"{language_instruction} "
+                "Never say you cannot understand or speak English, Hindi, Tamil, Telugu, or Malayalam. "
                 "Respond in natural complete sentences and avoid one-word answers unless explicitly requested."
             ),
             "stream": False,

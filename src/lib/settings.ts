@@ -3,7 +3,12 @@ export type PresenceMode = "virtual" | "physical";
 export type PersonalityTone = "balanced" | "concise" | "expressive";
 export type VoiceEngine = "neural" | "classic" | "local";
 export type VoicePersona = "auto" | "female" | "male";
-export type VoiceLanguage = "en-US" | "en-GB" | "hi-IN" | "ja-JP";
+export type VoiceLanguage =
+  | "en-US"
+  | "hi-IN"
+  | "ta-IN"
+  | "te-IN"
+  | "ml-IN";
 export type OrbPalette = "cyan" | "ice" | "white";
 
 export interface ZaraSettings {
@@ -61,7 +66,7 @@ export const defaultSettings: ZaraSettings = {
     responseMode: "smart",
     adaptiveReasoning: true,
     proactiveHints: false,
-    continuousLoop: false,
+    continuousLoop: true,
   },
   personality: {
     tone: "balanced",
