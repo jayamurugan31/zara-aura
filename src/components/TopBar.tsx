@@ -1,29 +1,44 @@
-import { useState } from "react";
+import { Settings2 } from "lucide-react";
 
-const modes = ["Online", "Smart", "Offline"] as const;
+import type { PresenceMode, ResponseMode } from "@/lib/settings";
 
-const TopBar = () => {
-  const [mode, setMode] = useState<typeof modes[number]>("Smart");
+interface TopBarProps {
+  mode: ResponseMode;
+  presence: PresenceMode;
+  onOpenSettings: () => void;
+}
 
+const modeLabel: Record<ResponseMode, string> = {
+  online: "Online",
+  smart: "Smart",
+  offline: "Offline",
+};
+
+const presenceLabel: Record<PresenceMode, string> = {
+  virtual: "Virtual",
+  physical: "Physical",
+};
+
+const TopBar = ({ mode, presence, onOpenSettings }: TopBarProps) => {
   return (
-    <div className="fixed top-0 left-0 right-0 flex items-center justify-between px-6 py-4 z-10">
-      <span className="text-xs font-light tracking-[0.3em] text-muted-foreground/60 uppercase">
-        Zara
-      </span>
-      <div className="flex items-center gap-1">
-        {modes.map((m) => (
-          <button
-            key={m}
-            onClick={() => setMode(m)}
-            className={`px-3 py-1 text-[11px] font-light rounded-full transition-all duration-300 ${
-              mode === m
-                ? "text-foreground bg-secondary"
-                : "text-muted-foreground/40 hover:text-muted-foreground/60"
-            }`}
-          >
-            {m}
-          </button>
-        ))}
+    <div className="fixed left-0 right-0 top-0 z-20 flex items-center justify-between px-5 py-4 sm:px-7">
+      <span className="text-[11px] font-light uppercase tracking-[0.32em] text-white/58">ZARA</span>
+
+      <div className="flex items-center gap-2">
+        <span className="rounded-full border border-white/10 bg-white/[0.03] px-3 py-1 text-[10px] font-light uppercase tracking-[0.18em] text-white/55">
+          {modeLabel[mode]}
+        </span>
+        <span className="rounded-full border border-white/10 bg-white/[0.03] px-3 py-1 text-[10px] font-light uppercase tracking-[0.18em] text-white/55">
+          {presenceLabel[presence]}
+        </span>
+        <button
+          type="button"
+          onClick={onOpenSettings}
+          className="group rounded-full border border-white/12 bg-white/[0.03] p-2 text-white/65 transition-all duration-300 hover:border-cyan-300/35 hover:text-[#EAEAEA] hover:shadow-[0_0_20px_rgba(34,211,238,0.16)]"
+          aria-label="Open settings"
+        >
+          <Settings2 className="h-4 w-4 transition-transform duration-300 group-hover:rotate-12" />
+        </button>
       </div>
     </div>
   );

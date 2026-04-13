@@ -1,0 +1,96 @@
+export type ResponseMode = "online" | "smart" | "offline";
+export type PresenceMode = "virtual" | "physical";
+export type PersonalityTone = "balanced" | "concise" | "expressive";
+export type VoiceEngine = "neural" | "classic" | "local";
+export type VoiceLanguage = "en-US" | "en-GB" | "hi-IN" | "ja-JP";
+export type OrbPalette = "cyan" | "ice" | "white";
+
+export interface ZaraSettings {
+  ai: {
+    responseMode: ResponseMode;
+    adaptiveReasoning: boolean;
+    proactiveHints: boolean;
+  };
+  personality: {
+    tone: PersonalityTone;
+    empathyBoost: boolean;
+  };
+  voice: {
+    micSensitivity: number;
+    voiceSpeed: number;
+    language: VoiceLanguage;
+    engine: VoiceEngine;
+  };
+  orb: {
+    palette: OrbPalette;
+    intensity: number;
+    reactivity: number;
+  };
+  mode: {
+    presence: PresenceMode;
+  };
+  automation: {
+    routines: boolean;
+    ambientTriggers: boolean;
+  };
+  memory: {
+    memoryEnabled: boolean;
+    longTermMemory: boolean;
+  };
+  privacy: {
+    onDeviceOnly: boolean;
+    retainVoiceLogs: boolean;
+  };
+  advanced: {
+    telemetry: boolean;
+    debugSignals: boolean;
+  };
+}
+
+export const orbPaletteHues: Record<OrbPalette, number> = {
+  cyan: 190,
+  ice: 205,
+  white: 0,
+};
+
+export const defaultSettings: ZaraSettings = {
+  ai: {
+    responseMode: "smart",
+    adaptiveReasoning: true,
+    proactiveHints: false,
+  },
+  personality: {
+    tone: "balanced",
+    empathyBoost: true,
+  },
+  voice: {
+    micSensitivity: 62,
+    voiceSpeed: 100,
+    language: "en-US",
+    engine: "neural",
+  },
+  orb: {
+    palette: "cyan",
+    intensity: 68,
+    reactivity: 72,
+  },
+  mode: {
+    presence: "virtual",
+  },
+  automation: {
+    routines: true,
+    ambientTriggers: false,
+  },
+  memory: {
+    memoryEnabled: true,
+    longTermMemory: true,
+  },
+  privacy: {
+    onDeviceOnly: false,
+    retainVoiceLogs: false,
+  },
+  advanced: {
+    telemetry: false,
+    debugSignals: false,
+  },
+};

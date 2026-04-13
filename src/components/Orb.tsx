@@ -5,6 +5,12 @@ type OrbState = "idle" | "listening" | "thinking" | "speaking";
 interface OrbProps {
   state: OrbState;
   audioStream?: MediaStream | null;
+  visuals?: {
+    hue: number;
+    intensity: number;
+    reactivity: number;
+    dimmed?: boolean;
+  };
 }
 
 interface Particle {
@@ -48,7 +54,7 @@ function createParticles(): Particle[] {
   return particles;
 }
 
-const Orb = ({ state, audioStream }: OrbProps) => {
+const Orb = ({ state, audioStream, visuals }: OrbProps) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const particlesRef = useRef<Particle[]>(createParticles());
   const frameRef = useRef<number>(0);
@@ -57,8 +63,20 @@ const Orb = ({ state, audioStream }: OrbProps) => {
   const dataArrayRef = useRef<Uint8Array | null>(null);
   const timeRef = useRef(0);
   const stateRef = useRef<OrbState>(state);
+  const visualsRef = useRef({
+    hue: 190,
+    intensity: 68,
+    reactivity: 72,
+    dimmed: false,
+  });
 
   stateRef.current = state;
+  visualsRef.current = {
+    hue: visuals?.hue ?? 190,
+    intensity: visuals?.intensity ?? 68,
+    reactivity: visuals?.reactivity ?? 72,
+    dimmed: visuals?.dimmed ?? false,
+  };
 
   // Setup audio analyser when stream changes
   useEffect(() => {
@@ -92,7 +110,7 @@ const Orb = ({ state, audioStream }: OrbProps) => {
       return { bass: 0, mid: 0, high: 0, overall: 0 };
     }
     const data = dataArrayRef.current;
-    analyserRef.current.getByteFrequencyData(data as Uint8Array<ArrayBuffer>);
+    analyserRef.current.getByteFrequencyData(data);
     const len = data.length;
     let bass = 0, mid = 0, high = 0;
     const bassEnd = Math.floor(len * 0.15);
@@ -131,7 +149,11 @@ const Orb = ({ state, audioStream }: OrbProps) => {
       timeRef.current += 0.016;
       const t = timeRef.current;
       const currentState = stateRef.current;
+      const currentVisuals = visualsRef.current;
       const audio = getAudioLevel();
+      const intensityFactor = 0.55 + currentVisuals.intensity / 100;
+      const reactivityFactor = 0.35 + currentVisuals.reactivity / 100;
+      const dimFactor = currentVisuals.dimmed ? 0.6 : 1;
 
       ctx.clearRect(0, 0, size, size);
 
@@ -172,6 +194,10 @@ const Orb = ({ state, audioStream }: OrbProps) => {
           break;
       }
 
+          rotationSpeed *= 0.75 + intensityFactor * 0.28;
+          breatheAmp *= intensityFactor;
+          turbulence *= reactivityFactor;
+
       const breathe = Math.sin(t * breatheSpeed) * breatheAmp;
       const rotation = t * rotationSpeed;
 
@@ -206,8 +232,8 @@ const Orb = ({ state, audioStream }: OrbProps) => {
           x: x2d,
           y: y2d,
           z: z3d,
-          size: p.size * scale * (1 + audio.overall * 0.5),
-          opacity: p.opacity * depthOpacity * (0.7 + audio.overall * 0.3),
+          size: p.size * scale * (1 + audio.overall * (0.28 + reactivityFactor * 0.2)),
+          opacity: p.opacity * depthOpacity * (0.62 + audio.overall * 0.38) * dimFactor,
         });
       }
 
@@ -216,9 +242,11 @@ const Orb = ({ state, audioStream }: OrbProps) => {
 
       // Draw particles
       for (const p of projected) {
+        const saturation = currentVisuals.hue === 0 ? 0 : 80;
+        const lightness = currentVisuals.hue === 0 ? 92 : 82;
         ctx.beginPath();
         ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
-        ctx.fillStyle = `hsla(190, 80%, 85%, ${p.opacity})`;
+        ctx.fillStyle = `hsla(${currentVisuals.hue}, ${saturation}%, ${lightness}%, ${p.opacity})`;
         ctx.fill();
       }
 
