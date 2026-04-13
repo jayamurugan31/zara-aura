@@ -135,8 +135,6 @@ const Index = () => {
 
   return (
     <div className="relative flex min-h-screen select-none flex-col items-center justify-center overflow-hidden bg-black">
-      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_20%_35%,rgba(255,255,255,0.06),transparent_42%)]" />
-
       <TopBar
         mode={settings.ai.responseMode}
         presence={settings.mode.presence}
@@ -146,7 +144,7 @@ const Index = () => {
       {/* Orb */}
       <motion.div
         className="relative z-10 flex flex-1 items-center justify-center"
-        animate={settingsOpen ? { opacity: 0.55, scale: 0.95, x: -24 } : { opacity: 1, scale: 1, x: 0 }}
+        animate={settingsOpen ? { opacity: 0.55, scale: 1.12, x: -30 } : { opacity: 1, scale: 1.24, x: 0 }}
         transition={{ duration: 0.45, ease: [0.22, 1, 0.36, 1] }}
       >
         <Orb state={orbState} audioStream={audioStream} visuals={orbVisuals} />

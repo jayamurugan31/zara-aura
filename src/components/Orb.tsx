@@ -28,7 +28,13 @@ interface Particle {
 }
 
 const PARTICLE_COUNT = 900;
-const BASE_RADIUS = 120;
+const BASE_RADIUS = 165;
+const CANVAS_SIZE = 520;
+const RENDERED_SIZE = "min(84vw, 560px)";
+
+function clamp(value: number, min: number, max: number) {
+  return Math.min(max, Math.max(min, value));
+}
 
 function createParticles(): Particle[] {
   const particles: Particle[] = [];
@@ -136,7 +142,7 @@ const Orb = ({ state, audioStream, visuals }: OrbProps) => {
     if (!ctx) return;
 
     const dpr = window.devicePixelRatio || 1;
-    const size = 400;
+    const size = CANVAS_SIZE;
     canvas.width = size * dpr;
     canvas.height = size * dpr;
     ctx.scale(dpr, dpr);
@@ -154,6 +160,21 @@ const Orb = ({ state, audioStream, visuals }: OrbProps) => {
       const intensityFactor = 0.55 + currentVisuals.intensity / 100;
       const reactivityFactor = 0.35 + currentVisuals.reactivity / 100;
       const dimFactor = currentVisuals.dimmed ? 0.6 : 1;
+      const stateHueOffset =
+        currentState === "listening" ? 16 : currentState === "thinking" ? -20 : currentState === "speaking" ? 30 : 0;
+      const hueOscillation = Math.sin(t * 0.85) * 12 + Math.cos(t * 0.37) * 6;
+      const audioHueBoost = audio.overall * 28;
+      const dynamicBaseHue = (currentVisuals.hue + stateHueOffset + hueOscillation + audioHueBoost + 360) % 360;
+      const baseSaturation =
+        currentVisuals.hue === 0
+          ? 8 + audio.overall * 24 + reactivityFactor * 6
+          : 64 + currentVisuals.intensity * 0.16 + Math.sin(t * 1.2) * 8 + audio.overall * 18;
+      const baseLightness =
+        currentVisuals.hue === 0
+          ? 86 + Math.sin(t * 1.1) * 4 + audio.overall * 6
+          : 74 + Math.cos(t * 1.1) * 6 + audio.overall * 10;
+      const saturation = clamp(baseSaturation, currentVisuals.hue === 0 ? 5 : 48, currentVisuals.hue === 0 ? 35 : 98);
+      const lightness = clamp(baseLightness, 58, 94);
 
       ctx.clearRect(0, 0, size, size);
 
@@ -221,8 +242,8 @@ const Orb = ({ state, audioStream, visuals }: OrbProps) => {
         const z3d = r * Math.sin(phi) * Math.sin(theta);
 
         // Simple perspective
-        const perspective = 400;
-        const scale = perspective / (perspective + z3d + 200);
+        const perspective = 540;
+        const scale = perspective / (perspective + z3d + 240);
         const x2d = cx + x3d * scale;
         const y2d = cy + y3d * scale;
 
@@ -242,11 +263,13 @@ const Orb = ({ state, audioStream, visuals }: OrbProps) => {
 
       // Draw particles
       for (const p of projected) {
-        const saturation = currentVisuals.hue === 0 ? 0 : 80;
-        const lightness = currentVisuals.hue === 0 ? 92 : 82;
+        const depthHueShift = (p.z / (BASE_RADIUS * 1.8)) * 24;
+        const shimmerHueShift = Math.sin(t * 1.4 + p.x * 0.025 + p.y * 0.02) * 6;
+        const particleHue = (dynamicBaseHue + depthHueShift + shimmerHueShift + 360) % 360;
+        const particleLightness = clamp(lightness + (p.z / (BASE_RADIUS * 2.2)) * 8, 55, 96);
         ctx.beginPath();
         ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
-        ctx.fillStyle = `hsla(${currentVisuals.hue}, ${saturation}%, ${lightness}%, ${p.opacity})`;
+        ctx.fillStyle = `hsla(${particleHue}, ${saturation}%, ${particleLightness}%, ${p.opacity})`;
         ctx.fill();
       }
 
@@ -264,7 +287,7 @@ const Orb = ({ state, audioStream, visuals }: OrbProps) => {
     <div className="relative flex items-center justify-center">
       <canvas
         ref={canvasRef}
-        style={{ width: 400, height: 400 }}
+        style={{ width: RENDERED_SIZE, height: RENDERED_SIZE }}
         className="pointer-events-none"
       />
     </div>
