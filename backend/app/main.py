@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 
@@ -8,12 +9,11 @@ import httpx
 from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, Request, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
-from fastapi.responses import ORJSONResponse
 
 from app.config import settings
 from app.schemas import AudioFeatures, ChatRequest, ChatResponse, ModeLiteral, ModeRequest, ModeResponse, VoiceResponse
 from app.services.ai_router import AIRouterService
-from app.services.audio_features import AudioFeatureService
+from app.services.audio_features import AudioFeatureResult, AudioFeatureService
 from app.services.automation import AutomationEngine
 from app.services.emotion_service import EmotionService
 from app.services.memory import MemoryStore
@@ -22,6 +22,9 @@ from app.services.ollama_client import OllamaClient
 from app.services.openrouter_client import OpenRouterClient
 from app.services.tts_service import TTSService
 from app.services.whisper_service import WhisperService
+
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(slots=True)
@@ -83,7 +86,6 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title=settings.app_name,
     version=settings.app_version,
-    default_response_class=ORJSONResponse,
     lifespan=lifespan,
 )
 
@@ -160,7 +162,12 @@ async def voice(
     if not audio_bytes:
         raise HTTPException(status_code=400, detail="Audio file is empty")
 
-    audio_features = await services.audio_feature_service.extract_from_bytes(audio_bytes)
+    try:
+        audio_features = await services.audio_feature_service.extract_from_bytes(audio_bytes)
+    except Exception as exc:
+        logger.warning("Audio feature extraction failed, using neutral defaults: %s", exc)
+        audio_features = AudioFeatureResult(volume=0.0, pitch=160.0, speech_rate=0.0, duration_seconds=0.0)
+
     if audio_features.duration_seconds > settings.max_audio_seconds:
         raise HTTPException(
             status_code=413,
@@ -170,7 +177,9 @@ async def voice(
     try:
         transcript = await services.whisper_service.transcribe_audio(audio_bytes)
     except ValueError as exc:
-        raise HTTPException(status_code=413, detail=str(exc)) from exc
+        detail = str(exc)
+        status_code = 413 if "too long" in detail.lower() else 422
+        raise HTTPException(status_code=status_code, detail=detail) from exc
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Transcription failed: {exc}") from exc
 
