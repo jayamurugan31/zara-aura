@@ -27,6 +27,7 @@ import type {
   ResponseMode,
   VoiceEngine,
   VoiceLanguage,
+  VoicePersona,
   ZaraSettings,
 } from "@/lib/settings";
 
@@ -67,6 +68,12 @@ const toneOptions: SegmentedOption<PersonalityTone>[] = [
   { value: "balanced", label: "Balanced" },
   { value: "concise", label: "Concise" },
   { value: "expressive", label: "Expressive" },
+];
+
+const voicePersonaOptions: SegmentedOption<VoicePersona>[] = [
+  { value: "auto", label: "Auto" },
+  { value: "female", label: "Female" },
+  { value: "male", label: "Male" },
 ];
 
 function SegmentedControl<T extends string>({
@@ -180,6 +187,21 @@ const SettingsPanel = ({ open, settings, onOpenChange, onSettingsChange }: Setti
                       ai: {
                         ...settings.ai,
                         proactiveHints: checked,
+                      },
+                    })
+                  }
+                  className="data-[state=checked]:bg-cyan-300/85 data-[state=unchecked]:bg-white/15"
+                />
+              </SettingRow>
+              <SettingRow icon={Workflow} label="Continuous Loop" hint="Auto-listen after each response">
+                <Switch
+                  checked={settings.ai.continuousLoop}
+                  onCheckedChange={(checked) =>
+                    update({
+                      ...settings,
+                      ai: {
+                        ...settings.ai,
+                        continuousLoop: checked,
                       },
                     })
                   }
@@ -320,6 +342,22 @@ const SettingsPanel = ({ open, settings, onOpenChange, onSettingsChange }: Setti
                       <SelectItem value="local">Local</SelectItem>
                     </SelectContent>
                   </Select>
+                </SettingRow>
+
+                <SettingRow icon={Bot} label="Voice Persona" alignTop>
+                  <SegmentedControl
+                    value={settings.voice.persona}
+                    onChange={(next) =>
+                      update({
+                        ...settings,
+                        voice: {
+                          ...settings.voice,
+                          persona: next,
+                        },
+                      })
+                    }
+                    options={voicePersonaOptions}
+                  />
                 </SettingRow>
               </div>
             </SettingsSection>

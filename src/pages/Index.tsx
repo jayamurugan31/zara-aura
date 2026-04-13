@@ -4,12 +4,13 @@ import Orb from "@/components/Orb";
 import MicButton from "@/components/MicButton";
 import SettingsPanel from "@/components/SettingsPanel";
 import TopBar from "@/components/TopBar";
-import { defaultSettings, orbPaletteHues, type ZaraSettings } from "@/lib/settings";
+import { defaultSettings, orbPaletteHues, type VoicePersona, type ZaraSettings } from "@/lib/settings";
 import { sendVoiceChunk, syncBackendMode, type BackendEmotion } from "@/lib/backend";
 
 type OrbState = "idle" | "listening" | "thinking" | "speaking";
 
 const AUTO_STOP_MS = 4500;
+const LOOP_RESTART_DELAY_MS = 520;
 
 function chooseRecorderMimeType(): string | undefined {
   if (typeof MediaRecorder === "undefined" || typeof MediaRecorder.isTypeSupported !== "function") {
@@ -27,7 +28,39 @@ function truncate(text: string, maxLength: number) {
   return `${text.slice(0, maxLength - 1)}...`;
 }
 
-function pickPreferredFemaleVoice(voices: SpeechSynthesisVoice[], language: string): SpeechSynthesisVoice | null {
+const femaleVoiceMarkers = [
+  "female",
+  "woman",
+  "girl",
+  "zira",
+  "samantha",
+  "victoria",
+  "joanna",
+  "ava",
+  "aria",
+  "jenny",
+  "sara",
+  "sonia",
+];
+
+const maleVoiceMarkers = [
+  "male",
+  "man",
+  "david",
+  "mark",
+  "james",
+  "daniel",
+  "george",
+  "alex",
+  "ryan",
+  "john",
+];
+
+function pickPreferredVoice(
+  voices: SpeechSynthesisVoice[],
+  language: string,
+  persona: VoicePersona,
+): SpeechSynthesisVoice | null {
   if (!voices.length) {
     return null;
   }
@@ -42,27 +75,22 @@ function pickPreferredFemaleVoice(voices: SpeechSynthesisVoice[], language: stri
 
   const pool = byLanguage.length ? byLanguage : voices;
 
-  const femaleMarkers = [
-    "female",
-    "woman",
-    "girl",
-    "zira",
-    "samantha",
-    "victoria",
-    "joanna",
-    "ava",
-    "aria",
-    "jenny",
-    "sara",
-    "sonia",
-  ];
+  const matchByMarkers = (markers: string[]) =>
+    pool.find((voice) => {
+      const name = voice.name.toLowerCase();
+      return markers.some((marker) => name.includes(marker));
+    }) ?? null;
 
-  const female = pool.find((voice) => {
-    const name = voice.name.toLowerCase();
-    return femaleMarkers.some((marker) => name.includes(marker));
-  });
+  if (persona === "female") {
+    return matchByMarkers(femaleVoiceMarkers) ?? pool[0] ?? null;
+  }
 
-  return female ?? pool[0] ?? null;
+  if (persona === "male") {
+    return matchByMarkers(maleVoiceMarkers) ?? pool[0] ?? null;
+  }
+
+  const defaultVoice = pool.find((voice) => voice.default);
+  return defaultVoice ?? matchByMarkers(femaleVoiceMarkers) ?? pool[0] ?? null;
 }
 
 const Index = () => {
@@ -81,6 +109,9 @@ const Index = () => {
   const recorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const autoStopTimerRef = useRef<number | null>(null);
+  const loopRestartTimerRef = useRef<number | null>(null);
+  const processVoiceChunkRef = useRef<(audioChunk: Blob) => Promise<void>>(async () => undefined);
+  const isProcessingRef = useRef(false);
   const mountedRef = useRef(true);
 
   const getPreferredVoice = useCallback(async (): Promise<SpeechSynthesisVoice | null> => {
@@ -105,13 +136,20 @@ const Index = () => {
       voices = synth.getVoices();
     }
 
-    return pickPreferredFemaleVoice(voices, settings.voice.language);
-  }, [settings.voice.language]);
+    return pickPreferredVoice(voices, settings.voice.language, settings.voice.persona);
+  }, [settings.voice.language, settings.voice.persona]);
 
   const clearAutoStop = useCallback(() => {
     if (autoStopTimerRef.current !== null) {
       window.clearTimeout(autoStopTimerRef.current);
       autoStopTimerRef.current = null;
+    }
+  }, []);
+
+  const clearLoopRestart = useCallback(() => {
+    if (loopRestartTimerRef.current !== null) {
+      window.clearTimeout(loopRestartTimerRef.current);
+      loopRestartTimerRef.current = null;
     }
   }, []);
 
@@ -121,6 +159,76 @@ const Index = () => {
     streamRef.current = null;
     setAudioStream(null);
   }, []);
+
+  const startListening = useCallback(
+    async (fromLoop = false) => {
+      if (isProcessingRef.current) {
+        return;
+      }
+
+      if (recorderRef.current && recorderRef.current.state !== "inactive") {
+        return;
+      }
+
+      if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === "undefined") {
+        setRuntimeHint("This browser does not support microphone recording.");
+        return;
+      }
+
+      clearLoopRestart();
+      clearAutoStop();
+
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        const mimeType = chooseRecorderMimeType();
+        const recorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
+
+        audioChunksRef.current = [];
+        streamRef.current = stream;
+        recorderRef.current = recorder;
+        setAudioStream(stream);
+
+        recorder.ondataavailable = (event: BlobEvent) => {
+          if (event.data.size > 0) {
+            audioChunksRef.current.push(event.data);
+          }
+        };
+
+        recorder.onstop = () => {
+          const chunkType = recorder.mimeType || "audio/webm";
+          const chunk = new Blob(audioChunksRef.current, { type: chunkType });
+          audioChunksRef.current = [];
+          recorderRef.current = null;
+          releaseAudioStream();
+
+          if (chunk.size === 0) {
+            setIsProcessing(false);
+            setRuntimeHint("No voice captured. Please try again.");
+            return;
+          }
+
+          void processVoiceChunkRef.current(chunk);
+        };
+
+        recorder.start();
+        setOrbState("listening");
+        setRuntimeHint(fromLoop ? "Continuous loop listening..." : "Listening...");
+
+        autoStopTimerRef.current = window.setTimeout(() => {
+          if (recorder.state !== "inactive") {
+            setIsProcessing(true);
+            setRuntimeHint(fromLoop ? "Loop: sending voice chunk..." : "Auto-sending voice chunk...");
+            recorder.stop();
+          }
+        }, AUTO_STOP_MS);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Microphone permission denied";
+        setRuntimeHint(message);
+        releaseAudioStream();
+      }
+    },
+    [clearAutoStop, clearLoopRestart, releaseAudioStream],
+  );
 
   const speakResponse = useCallback(
     async (text: string) => {
@@ -150,6 +258,8 @@ const Index = () => {
 
   const processVoiceChunk = useCallback(
     async (audioChunk: Blob) => {
+      let shouldContinueLoop = false;
+
       setOrbState("thinking");
       setRuntimeHint("Processing voice with ZARA backend...");
 
@@ -170,6 +280,7 @@ const Index = () => {
 
         setOrbState("speaking");
         await speakResponse(response.text);
+        shouldContinueLoop = true;
       } catch (error) {
         if (!mountedRef.current) return;
 
@@ -180,10 +291,28 @@ const Index = () => {
         if (!mountedRef.current) return;
         setOrbState("idle");
         setIsProcessing(false);
+
+        if (shouldContinueLoop && settings.ai.continuousLoop) {
+          setRuntimeHint("Continuous loop active...");
+          clearLoopRestart();
+          loopRestartTimerRef.current = window.setTimeout(() => {
+            if (!mountedRef.current) {
+              return;
+            }
+            if (isProcessingRef.current) {
+              return;
+            }
+            void startListening(true);
+          }, LOOP_RESTART_DELAY_MS);
+        }
       }
     },
-    [settings.ai.responseMode, speakResponse],
+    [clearLoopRestart, settings.ai.continuousLoop, settings.ai.responseMode, speakResponse, startListening],
   );
+
+  useEffect(() => {
+    processVoiceChunkRef.current = processVoiceChunk;
+  }, [processVoiceChunk]);
 
   const stopRecording = useCallback(() => {
     const recorder = recorderRef.current;
@@ -197,15 +326,26 @@ const Index = () => {
   }, [clearAutoStop]);
 
   useEffect(() => {
+    isProcessingRef.current = isProcessing;
+  }, [isProcessing]);
+
+  useEffect(() => {
     mountedRef.current = true;
     return () => {
       mountedRef.current = false;
       stopRecording();
       releaseAudioStream();
       clearAutoStop();
+      clearLoopRestart();
       window.speechSynthesis?.cancel();
     };
-  }, [clearAutoStop, releaseAudioStream, stopRecording]);
+  }, [clearAutoStop, clearLoopRestart, releaseAudioStream, stopRecording]);
+
+  useEffect(() => {
+    if (!settings.ai.continuousLoop) {
+      clearLoopRestart();
+    }
+  }, [clearLoopRestart, settings.ai.continuousLoop]);
 
   useEffect(() => {
     let active = true;
@@ -236,7 +376,9 @@ const Index = () => {
     }
 
     if (orbState === "listening") {
-      return "Tap once more to send, or wait for auto-send.";
+      return settings.ai.continuousLoop
+        ? "Loop mode on. Tap once to send or pause between turns."
+        : "Tap once more to send, or wait for auto-send.";
     }
 
     if (orbState === "speaking") {
@@ -247,8 +389,12 @@ const Index = () => {
       return `Heard: ${truncate(lastTranscript, 90)}`;
     }
 
+    if (settings.ai.continuousLoop) {
+      return "Continuous loop is active. ZARA will keep listening after replies.";
+    }
+
     return settings.ai.proactiveHints ? "Speak naturally. ZARA can suggest next actions." : "How can I help you?";
-  }, [lastEmotion, lastTranscript, orbState, runtimeHint, settings.ai.proactiveHints]);
+  }, [lastEmotion, lastTranscript, orbState, runtimeHint, settings.ai.continuousLoop, settings.ai.proactiveHints]);
 
   const orbVisuals = useMemo(
     () => ({
@@ -265,7 +411,7 @@ const Index = () => {
   );
 
   const handleMicToggle = useCallback(async () => {
-    if (isProcessing) {
+    if (isProcessingRef.current) {
       return;
     }
 
@@ -277,72 +423,25 @@ const Index = () => {
     }
 
     if (orbState !== "idle") {
+      clearLoopRestart();
+      clearAutoStop();
       window.speechSynthesis?.cancel();
+      releaseAudioStream();
       setOrbState("idle");
+      setIsProcessing(false);
       setRuntimeHint("");
       return;
     }
 
-    if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === "undefined") {
-      setRuntimeHint("This browser does not support microphone recording.");
-      return;
-    }
-
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const mimeType = chooseRecorderMimeType();
-      const recorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
-
-      audioChunksRef.current = [];
-      streamRef.current = stream;
-      recorderRef.current = recorder;
-      setAudioStream(stream);
-
-      recorder.ondataavailable = (event: BlobEvent) => {
-        if (event.data.size > 0) {
-          audioChunksRef.current.push(event.data);
-        }
-      };
-
-      recorder.onstop = () => {
-        const chunkType = recorder.mimeType || "audio/webm";
-        const chunk = new Blob(audioChunksRef.current, { type: chunkType });
-        audioChunksRef.current = [];
-        recorderRef.current = null;
-        releaseAudioStream();
-
-        if (chunk.size === 0) {
-          setIsProcessing(false);
-          setRuntimeHint("No voice captured. Please try again.");
-          return;
-        }
-
-        void processVoiceChunk(chunk);
-      };
-
-      recorder.start();
-      setOrbState("listening");
-      setRuntimeHint("Listening...");
-
-      autoStopTimerRef.current = window.setTimeout(() => {
-        if (recorder.state !== "inactive") {
-          setIsProcessing(true);
-          setRuntimeHint("Auto-sending voice chunk...");
-          recorder.stop();
-        }
-      }, AUTO_STOP_MS);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Microphone permission denied";
-      setRuntimeHint(message);
-      releaseAudioStream();
-    }
-  }, [isProcessing, orbState, processVoiceChunk, releaseAudioStream, stopRecording]);
+    await startListening(false);
+  }, [clearAutoStop, clearLoopRestart, orbState, releaseAudioStream, startListening, stopRecording]);
 
   return (
     <div className="relative flex min-h-screen select-none flex-col items-center justify-center overflow-hidden bg-black">
       <TopBar
         mode={settings.ai.responseMode}
         presence={settings.mode.presence}
+        continuousLoop={settings.ai.continuousLoop}
         onOpenSettings={() => setSettingsOpen(true)}
       />
 

@@ -72,7 +72,7 @@ class Settings:
     cache_ttl_seconds: int = _env_int("CACHE_TTL_SECONDS", 90)
     cache_max_entries: int = _env_int("CACHE_MAX_ENTRIES", 256)
 
-    memory_limit: int = _env_int("MEMORY_LIMIT", 5)
+    memory_limit: int = _env_int("MEMORY_LIMIT", 12)
 
     automation_execute: bool = _env_bool("AUTOMATION_EXECUTE", False)
 
