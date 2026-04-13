@@ -19,10 +19,15 @@ class OllamaClient:
         payload = {
             "model": model or self.settings.ollama_model,
             "prompt": prompt,
+            "system": (
+                "You are ZARA AI, a helpful conversational assistant. "
+                "Respond in natural complete sentences and avoid one-word answers unless explicitly requested."
+            ),
             "stream": False,
             "options": {
-                "temperature": 0.3,
-                "num_ctx": 1024,
+                "temperature": 0.6,
+                "num_ctx": self.settings.ollama_num_ctx,
+                "num_predict": self.settings.ollama_num_predict,
                 "top_k": 20,
             },
         }

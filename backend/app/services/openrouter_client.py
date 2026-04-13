@@ -22,8 +22,9 @@ class OpenRouterClient:
             raise RuntimeError("OPENROUTER_API_KEY is not configured")
 
         system_prompt = (
-            "You are ZARA AI, a concise voice-first assistant. "
-            "Return direct and practical answers with minimal filler."
+            "You are ZARA AI, a warm and conversational voice-first assistant. "
+            "Answer naturally in clear complete sentences, usually 2-5 sentences unless the user asks for brief output. "
+            "Avoid one-word replies except for strict yes/no requests."
         )
 
         messages: list[dict[str, str]] = [{"role": "system", "content": system_prompt}]
@@ -34,8 +35,8 @@ class OpenRouterClient:
         payload = {
             "model": self.settings.openrouter_model,
             "messages": messages,
-            "temperature": 0.4,
-            "max_tokens": 320,
+            "temperature": self.settings.openrouter_temperature,
+            "max_tokens": self.settings.openrouter_max_tokens,
         }
 
         headers = {

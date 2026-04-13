@@ -110,17 +110,24 @@ class AIRouterService:
     ) -> tuple[str, RouteSource]:
         if self._is_simple_query(text):
             try:
-                quick_offline = await asyncio.wait_for(
-                    self.ollama_client.generate(
-                        text,
-                        model=self.settings.ollama_model,
-                        timeout_s=min(4.0, self.settings.ollama_timeout_s),
-                    ),
-                    timeout=4.2,
+                online = await asyncio.wait_for(
+                    self.openrouter_client.chat(text, history=history),
+                    timeout=self.settings.openrouter_timeout_s,
                 )
-                return quick_offline, "ollama"
+                return online, "openrouter"
             except Exception:
-                return await self._online_with_fallback(text, history)
+                try:
+                    quick_offline = await asyncio.wait_for(
+                        self.ollama_client.generate(
+                            text,
+                            model=self.settings.ollama_model,
+                            timeout_s=min(4.0, self.settings.ollama_timeout_s),
+                        ),
+                        timeout=4.2,
+                    )
+                    return quick_offline, "ollama"
+                except Exception:
+                    return await self._online_with_fallback(text, history)
 
         try:
             online = await asyncio.wait_for(

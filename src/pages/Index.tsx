@@ -27,6 +27,44 @@ function truncate(text: string, maxLength: number) {
   return `${text.slice(0, maxLength - 1)}...`;
 }
 
+function pickPreferredFemaleVoice(voices: SpeechSynthesisVoice[], language: string): SpeechSynthesisVoice | null {
+  if (!voices.length) {
+    return null;
+  }
+
+  const normalizedLanguage = language.toLowerCase();
+  const langPrefix = normalizedLanguage.split("-")[0];
+
+  const byLanguage = voices.filter((voice) => {
+    const voiceLang = voice.lang.toLowerCase();
+    return voiceLang === normalizedLanguage || voiceLang.startsWith(`${langPrefix}-`) || voiceLang.startsWith(langPrefix);
+  });
+
+  const pool = byLanguage.length ? byLanguage : voices;
+
+  const femaleMarkers = [
+    "female",
+    "woman",
+    "girl",
+    "zira",
+    "samantha",
+    "victoria",
+    "joanna",
+    "ava",
+    "aria",
+    "jenny",
+    "sara",
+    "sonia",
+  ];
+
+  const female = pool.find((voice) => {
+    const name = voice.name.toLowerCase();
+    return femaleMarkers.some((marker) => name.includes(marker));
+  });
+
+  return female ?? pool[0] ?? null;
+}
+
 const Index = () => {
   const [orbState, setOrbState] = useState<OrbState>("idle");
   const [audioStream, setAudioStream] = useState<MediaStream | null>(null);
@@ -44,6 +82,31 @@ const Index = () => {
   const audioChunksRef = useRef<Blob[]>([]);
   const autoStopTimerRef = useRef<number | null>(null);
   const mountedRef = useRef(true);
+
+  const getPreferredVoice = useCallback(async (): Promise<SpeechSynthesisVoice | null> => {
+    if (!("speechSynthesis" in window)) {
+      return null;
+    }
+
+    const synth = window.speechSynthesis;
+    let voices = synth.getVoices();
+
+    if (!voices.length) {
+      await new Promise<void>((resolve) => {
+        const complete = () => {
+          synth.removeEventListener("voiceschanged", complete);
+          resolve();
+        };
+
+        synth.addEventListener("voiceschanged", complete, { once: true });
+        window.setTimeout(complete, 450);
+      });
+
+      voices = synth.getVoices();
+    }
+
+    return pickPreferredFemaleVoice(voices, settings.voice.language);
+  }, [settings.voice.language]);
 
   const clearAutoStop = useCallback(() => {
     if (autoStopTimerRef.current !== null) {
@@ -69,6 +132,12 @@ const Index = () => {
       const utterance = new SpeechSynthesisUtterance(text);
       utterance.lang = settings.voice.language;
       utterance.rate = Math.min(1.4, Math.max(0.75, settings.voice.voiceSpeed / 100));
+      utterance.pitch = 1.08;
+
+      const preferredVoice = await getPreferredVoice();
+      if (preferredVoice) {
+        utterance.voice = preferredVoice;
+      }
 
       await new Promise<void>((resolve) => {
         utterance.onend = () => resolve();
@@ -76,7 +145,7 @@ const Index = () => {
         window.speechSynthesis.speak(utterance);
       });
     },
-    [settings.voice.language, settings.voice.voiceSpeed],
+    [getPreferredVoice, settings.voice.language, settings.voice.voiceSpeed],
   );
 
   const processVoiceChunk = useCallback(

@@ -54,11 +54,15 @@ class Settings:
     openrouter_base_url: str = os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
     openrouter_model: str = os.getenv("OPENROUTER_MODEL", "google/gemini-2.0-flash-001")
     openrouter_timeout_s: float = _env_float("OPENROUTER_TIMEOUT_S", 10.0)
+    openrouter_temperature: float = _env_float("OPENROUTER_TEMPERATURE", 0.65)
+    openrouter_max_tokens: int = _env_int("OPENROUTER_MAX_TOKENS", 720)
 
     ollama_base_url: str = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
     ollama_model: str = os.getenv("OLLAMA_MODEL", "phi3:mini")
     ollama_fallback_model: str = os.getenv("OLLAMA_FALLBACK_MODEL", "gemma2:2b")
     ollama_timeout_s: float = _env_float("OLLAMA_TIMEOUT_S", 8.0)
+    ollama_num_ctx: int = _env_int("OLLAMA_NUM_CTX", 2048)
+    ollama_num_predict: int = _env_int("OLLAMA_NUM_PREDICT", 260)
 
     whisper_model_size: str = os.getenv("WHISPER_MODEL_SIZE", "tiny")
     whisper_device: str = os.getenv("WHISPER_DEVICE", "cpu")
