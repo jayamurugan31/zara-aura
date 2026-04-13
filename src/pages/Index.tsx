@@ -5,7 +5,7 @@ import MicButton from "@/components/MicButton";
 import SettingsPanel from "@/components/SettingsPanel";
 import TopBar from "@/components/TopBar";
 import { defaultSettings, orbPaletteHues, type VoicePersona, type ZaraSettings } from "@/lib/settings";
-import { sendVoiceChunk, syncBackendMode, type BackendEmotion } from "@/lib/backend";
+import { sendVoiceChunk, syncBackendMode, type BackendAction, type BackendEmotion } from "@/lib/backend";
 
 type OrbState = "idle" | "listening" | "thinking" | "speaking";
 
@@ -26,6 +26,56 @@ function truncate(text: string, maxLength: number) {
     return text;
   }
   return `${text.slice(0, maxLength - 1)}...`;
+}
+
+function normalizeSpeechLanguageTag(language: string | undefined, fallback: string): string {
+  if (!language) {
+    return fallback;
+  }
+
+  const lowered = language.trim().toLowerCase();
+  if (!lowered) {
+    return fallback;
+  }
+
+  if (lowered.includes("-")) {
+    return lowered;
+  }
+
+  const codeMap: Record<string, string> = {
+    ar: "ar-SA",
+    as: "as-IN",
+    bn: "bn-IN",
+    de: "de-DE",
+    en: "en-US",
+    es: "es-ES",
+    fr: "fr-FR",
+    gu: "gu-IN",
+    hi: "hi-IN",
+    it: "it-IT",
+    ja: "ja-JP",
+    kn: "kn-IN",
+    ko: "ko-KR",
+    ml: "ml-IN",
+    mr: "mr-IN",
+    ne: "ne-NP",
+    or: "or-IN",
+    pa: "pa-IN",
+    nl: "nl-NL",
+    pt: "pt-BR",
+    ru: "ru-RU",
+    ta: "ta-IN",
+    te: "te-IN",
+    tr: "tr-TR",
+    ur: "ur-PK",
+    zh: "zh-CN",
+  };
+
+  return codeMap[lowered] ?? fallback;
+}
+
+function actionString(value: unknown): string | null {
+  return typeof value === "string" ? value : null;
 }
 
 const femaleVoiceMarkers = [
@@ -100,6 +150,7 @@ const Index = () => {
   const [settings, setSettings] = useState<ZaraSettings>(defaultSettings);
   const [assistantText, setAssistantText] = useState("Hello, I'm ZARA.");
   const [lastTranscript, setLastTranscript] = useState("");
+  const [lastLanguage, setLastLanguage] = useState("en");
   const [lastEmotion, setLastEmotion] = useState<BackendEmotion>("neutral");
   const [runtimeHint, setRuntimeHint] = useState("");
   const [isProcessing, setIsProcessing] = useState(false);
@@ -114,7 +165,7 @@ const Index = () => {
   const isProcessingRef = useRef(false);
   const mountedRef = useRef(true);
 
-  const getPreferredVoice = useCallback(async (): Promise<SpeechSynthesisVoice | null> => {
+  const getPreferredVoice = useCallback(async (languageTag: string): Promise<SpeechSynthesisVoice | null> => {
     if (!("speechSynthesis" in window)) {
       return null;
     }
@@ -136,8 +187,8 @@ const Index = () => {
       voices = synth.getVoices();
     }
 
-    return pickPreferredVoice(voices, settings.voice.language, settings.voice.persona);
-  }, [settings.voice.language, settings.voice.persona]);
+    return pickPreferredVoice(voices, languageTag, settings.voice.persona);
+  }, [settings.voice.persona]);
 
   const clearAutoStop = useCallback(() => {
     if (autoStopTimerRef.current !== null) {
@@ -159,6 +210,39 @@ const Index = () => {
     streamRef.current = null;
     setAudioStream(null);
   }, []);
+
+  const handleAutomationAction = useCallback(
+    (action: BackendAction | null): string | null => {
+      if (!action) {
+        return null;
+      }
+
+      const actionType = actionString(action.type) ?? "automation";
+      const actionStatus = actionString(action.status) ?? "planned";
+      const mcpTool = actionString(action.mcp_tool);
+      const target = actionString(action.target) ?? actionString(action.mcp_url);
+      const actionError = actionString(action.error);
+
+      if (actionStatus === "executed" || actionStatus === "executed_fallback") {
+        return `Action ${actionType} executed`;
+      }
+
+      if (actionStatus === "failed") {
+        return actionError ? `Action ${actionType} failed: ${actionError}` : `Action ${actionType} failed`;
+      }
+
+      if (settings.automation.routines && mcpTool === "open_url" && target && actionStatus === "planned") {
+        const popup = window.open(target, "_blank", "noopener,noreferrer");
+        if (popup) {
+          return `Action ${actionType} executed`;
+        }
+        return `Action ${actionType} blocked by browser popup settings`;
+      }
+
+      return `Action ${actionType} ${actionStatus}`;
+    },
+    [settings.automation.routines],
+  );
 
   const startListening = useCallback(
     async (fromLoop = false) => {
@@ -231,18 +315,19 @@ const Index = () => {
   );
 
   const speakResponse = useCallback(
-    async (text: string) => {
+    async (text: string, spokenLanguage?: string) => {
       if (!("speechSynthesis" in window) || !text.trim()) {
         return;
       }
 
       window.speechSynthesis.cancel();
+      const resolvedLanguage = normalizeSpeechLanguageTag(spokenLanguage, settings.voice.language);
       const utterance = new SpeechSynthesisUtterance(text);
-      utterance.lang = settings.voice.language;
+      utterance.lang = resolvedLanguage;
       utterance.rate = Math.min(1.4, Math.max(0.75, settings.voice.voiceSpeed / 100));
-      utterance.pitch = 1.08;
+      utterance.pitch = settings.voice.persona === "male" ? 0.94 : settings.voice.persona === "female" ? 1.08 : 1;
 
-      const preferredVoice = await getPreferredVoice();
+      const preferredVoice = await getPreferredVoice(resolvedLanguage);
       if (preferredVoice) {
         utterance.voice = preferredVoice;
       }
@@ -253,7 +338,7 @@ const Index = () => {
         window.speechSynthesis.speak(utterance);
       });
     },
-    [getPreferredVoice, settings.voice.language, settings.voice.voiceSpeed],
+    [getPreferredVoice, settings.voice.language, settings.voice.persona, settings.voice.voiceSpeed],
   );
 
   const processVoiceChunk = useCallback(
@@ -270,16 +355,18 @@ const Index = () => {
         setAssistantText(response.text);
         setLastTranscript(response.transcript);
         setLastEmotion(response.emotion);
+        setLastLanguage(response.language);
         setVoiceSignal(response.audio_features);
 
-        if (response.action && response.action.type) {
-          setRuntimeHint(`Action ${String(response.action.type)} ${String(response.action.status ?? "ready")}`);
+        const actionRuntimeHint = handleAutomationAction(response.action);
+        if (actionRuntimeHint) {
+          setRuntimeHint(actionRuntimeHint);
         } else {
           setRuntimeHint("");
         }
 
         setOrbState("speaking");
-        await speakResponse(response.text);
+        await speakResponse(response.text, response.language);
         shouldContinueLoop = true;
       } catch (error) {
         if (!mountedRef.current) return;
@@ -307,7 +394,7 @@ const Index = () => {
         }
       }
     },
-    [clearLoopRestart, settings.ai.continuousLoop, settings.ai.responseMode, speakResponse, startListening],
+    [clearLoopRestart, handleAutomationAction, settings.ai.continuousLoop, settings.ai.responseMode, speakResponse, startListening],
   );
 
   useEffect(() => {
@@ -382,7 +469,7 @@ const Index = () => {
     }
 
     if (orbState === "speaking") {
-      return `Emotion: ${lastEmotion}`;
+      return `Emotion: ${lastEmotion} | Lang: ${lastLanguage}`;
     }
 
     if (lastTranscript) {
@@ -394,7 +481,7 @@ const Index = () => {
     }
 
     return settings.ai.proactiveHints ? "Speak naturally. ZARA can suggest next actions." : "How can I help you?";
-  }, [lastEmotion, lastTranscript, orbState, runtimeHint, settings.ai.continuousLoop, settings.ai.proactiveHints]);
+  }, [lastEmotion, lastLanguage, lastTranscript, orbState, runtimeHint, settings.ai.continuousLoop, settings.ai.proactiveHints]);
 
   const orbVisuals = useMemo(
     () => ({

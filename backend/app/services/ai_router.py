@@ -38,22 +38,24 @@ class AIRouterService:
         text: str,
         mode: ModeLiteral,
         history: list[dict[str, str]] | None = None,
+        response_language: str | None = None,
     ) -> tuple[str, RouteSource]:
         normalized = " ".join(text.strip().split())
         if not normalized:
             return "Please share a valid prompt.", "openrouter"
 
-        cache_key = f"{mode}:{normalized.lower()}"
+        language_key = (response_language or "auto").strip().lower()
+        cache_key = f"{mode}:{language_key}:{normalized.lower()}"
         cached = await self._cache_get(cache_key)
         if cached is not None:
             return cached, "openrouter"
 
         if mode == "offline":
-            answer, source = await self._offline_only(normalized)
+            answer, source = await self._offline_only(normalized, response_language=response_language)
         elif mode == "online":
-            answer, source = await self._online_with_fallback(normalized, history)
+            answer, source = await self._online_with_fallback(normalized, history, response_language=response_language)
         else:
-            answer, source = await self._smart_route(normalized, history)
+            answer, source = await self._smart_route(normalized, history, response_language=response_language)
 
         await self._cache_set(cache_key, answer)
         return answer, source
@@ -66,12 +68,13 @@ class AIRouterService:
         async with self._cache_lock:
             self.cache[key] = value
 
-    async def _offline_only(self, text: str) -> tuple[str, RouteSource]:
+    async def _offline_only(self, text: str, response_language: str | None = None) -> tuple[str, RouteSource]:
         try:
             response = await self.ollama_client.generate(
                 text,
                 model=self.settings.ollama_model,
                 timeout_s=self.settings.ollama_timeout_s,
+                response_language=response_language,
             )
             return response, "ollama"
         except Exception:
@@ -80,6 +83,7 @@ class AIRouterService:
                     text,
                     model=self.settings.ollama_fallback_model,
                     timeout_s=self.settings.ollama_timeout_s,
+                    response_language=response_language,
                 )
                 return fallback_response, "ollama"
             except Exception:
@@ -92,26 +96,28 @@ class AIRouterService:
         self,
         text: str,
         history: list[dict[str, str]] | None,
+        response_language: str | None = None,
     ) -> tuple[str, RouteSource]:
         try:
             response = await asyncio.wait_for(
-                self.openrouter_client.chat(text, history=history),
+                self.openrouter_client.chat(text, history=history, response_language=response_language),
                 timeout=self.settings.openrouter_timeout_s,
             )
             return response, "openrouter"
         except (asyncio.TimeoutError, httpx.HTTPError, RuntimeError):
-            offline_response, _ = await self._offline_only(text)
+            offline_response, _ = await self._offline_only(text, response_language=response_language)
             return offline_response, "ollama"
 
     async def _smart_route(
         self,
         text: str,
         history: list[dict[str, str]] | None,
+        response_language: str | None = None,
     ) -> tuple[str, RouteSource]:
         if self._is_simple_query(text):
             try:
                 online = await asyncio.wait_for(
-                    self.openrouter_client.chat(text, history=history),
+                    self.openrouter_client.chat(text, history=history, response_language=response_language),
                     timeout=self.settings.openrouter_timeout_s,
                 )
                 return online, "openrouter"
@@ -122,21 +128,22 @@ class AIRouterService:
                             text,
                             model=self.settings.ollama_model,
                             timeout_s=min(4.0, self.settings.ollama_timeout_s),
+                            response_language=response_language,
                         ),
                         timeout=4.2,
                     )
                     return quick_offline, "ollama"
                 except Exception:
-                    return await self._online_with_fallback(text, history)
+                    return await self._online_with_fallback(text, history, response_language=response_language)
 
         try:
             online = await asyncio.wait_for(
-                self.openrouter_client.chat(text, history=history),
+                self.openrouter_client.chat(text, history=history, response_language=response_language),
                 timeout=self.settings.openrouter_timeout_s,
             )
             return online, "openrouter"
         except (asyncio.TimeoutError, httpx.HTTPError, RuntimeError):
-            fallback_offline, _ = await self._offline_only(text)
+            fallback_offline, _ = await self._offline_only(text, response_language=response_language)
             return fallback_offline, "ollama"
 
     def _is_simple_query(self, text: str) -> bool:

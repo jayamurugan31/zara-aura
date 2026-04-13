@@ -34,6 +34,7 @@ class ChatResponse(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     text: str
+    language: str = Field(min_length=2, max_length=16)
     emotion: EmotionLiteral
     audio_features: AudioFeatures
     action: dict[str, Any] | None = None

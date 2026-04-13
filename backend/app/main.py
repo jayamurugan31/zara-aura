@@ -16,7 +16,9 @@ from app.services.ai_router import AIRouterService
 from app.services.audio_features import AudioFeatureResult, AudioFeatureService
 from app.services.automation import AutomationEngine
 from app.services.emotion_service import EmotionService
+from app.services.language_service import LanguageService
 from app.services.memory import MemoryStore
+from app.services.mcp_service import MCPService
 from app.services.mode_state import ModeState
 from app.services.ollama_client import OllamaClient
 from app.services.openrouter_client import OpenRouterClient
@@ -31,6 +33,8 @@ logger = logging.getLogger(__name__)
 class ServiceContainer:
     memory_store: MemoryStore
     mode_state: ModeState
+    language_service: LanguageService
+    mcp_service: MCPService
     audio_feature_service: AudioFeatureService
     emotion_service: EmotionService
     automation_engine: AutomationEngine
@@ -58,13 +62,16 @@ async def lifespan(app: FastAPI):
 
     openrouter_client = OpenRouterClient(openrouter_http, settings)
     ollama_client = OllamaClient(ollama_http, settings)
+    mcp_service = MCPService(settings)
 
     services = ServiceContainer(
         memory_store=MemoryStore(limit=settings.memory_limit),
         mode_state=ModeState(default_mode=default_mode),
+        language_service=LanguageService(),
+        mcp_service=mcp_service,
         audio_feature_service=AudioFeatureService(),
         emotion_service=EmotionService(),
-        automation_engine=AutomationEngine(settings),
+        automation_engine=AutomationEngine(settings, mcp_service=mcp_service),
         whisper_service=WhisperService(settings),
         tts_service=TTSService(settings),
         ai_router=AIRouterService(
@@ -119,6 +126,7 @@ async def set_mode(payload: ModeRequest, request: Request) -> ModeResponse:
 @app.post("/chat", response_model=ChatResponse)
 async def chat(payload: ChatRequest, background_tasks: BackgroundTasks, request: Request) -> ChatResponse:
     services = get_services(request)
+    detected_language = services.language_service.detect(payload.text)
 
     effective_mode: ModeLiteral = payload.mode or await services.mode_state.get_mode()
     history = await services.memory_store.get_messages()
@@ -127,9 +135,10 @@ async def chat(payload: ChatRequest, background_tasks: BackgroundTasks, request:
         text=payload.text,
         mode=effective_mode,
         history=history,
+        response_language=detected_language.name,
     )
 
-    action = await services.automation_engine.detect_and_execute(payload.text)
+    action = await services.automation_engine.detect_and_execute(payload.text, language_code=detected_language.code)
 
     volume = float(payload.volume or 0.0)
     pitch = round(110.0 + (volume * 220.0), 1)
@@ -142,6 +151,7 @@ async def chat(payload: ChatRequest, background_tasks: BackgroundTasks, request:
 
     return ChatResponse(
         text=response_text,
+        language=detected_language.code,
         emotion=emotion,
         audio_features=AudioFeatures(volume=round(volume, 3), pitch=pitch),
         action=action,
@@ -186,6 +196,8 @@ async def voice(
     if not transcript:
         raise HTTPException(status_code=422, detail="Could not detect speech in the provided audio")
 
+    detected_language = services.language_service.detect(transcript)
+
     effective_mode: ModeLiteral = mode or await services.mode_state.get_mode()
     history = await services.memory_store.get_messages()
 
@@ -193,9 +205,10 @@ async def voice(
         text=transcript,
         mode=effective_mode,
         history=history,
+        response_language=detected_language.name,
     )
 
-    action = await services.automation_engine.detect_and_execute(transcript)
+    action = await services.automation_engine.detect_and_execute(transcript, language_code=detected_language.code)
     emotion = services.emotion_service.detect(transcript, audio_features.volume)
 
     await services.memory_store.add_turn(transcript, response_text)
@@ -206,6 +219,7 @@ async def voice(
     return VoiceResponse(
         transcript=transcript,
         text=response_text,
+        language=detected_language.code,
         emotion=emotion,
         audio_features=AudioFeatures(
             volume=audio_features.volume,

@@ -76,6 +76,17 @@ class Settings:
 
     automation_execute: bool = _env_bool("AUTOMATION_EXECUTE", False)
 
+    mcp_enabled: bool = _env_bool("MCP_ENABLED", False)
+    mcp_transport: str = os.getenv("MCP_TRANSPORT", "http")
+    mcp_http_url: str = os.getenv("MCP_HTTP_URL", "http://127.0.0.1:8099/mcp")
+    mcp_ws_url: str = os.getenv("MCP_WS_URL", "ws://127.0.0.1:8099/mcp")
+    mcp_stdio_command: str = os.getenv("MCP_STDIO_COMMAND", "")
+    mcp_auth_mode: str = os.getenv("MCP_AUTH_MODE", "none")
+    mcp_auth_header: str = os.getenv("MCP_AUTH_HEADER", "Authorization")
+    mcp_auth_token: str = os.getenv("MCP_AUTH_TOKEN", "")
+    mcp_timeout_s: float = _env_float("MCP_TIMEOUT_S", 8.0)
+    mcp_open_url_tool: str = os.getenv("MCP_OPEN_URL_TOOL", "open_url")
+
     tts_enabled: bool = _env_bool("TTS_ENABLED", False)
     tts_model_name: str = os.getenv("TTS_MODEL_NAME", "tts_models/en/ljspeech/tacotron2-DDC_ph")
 

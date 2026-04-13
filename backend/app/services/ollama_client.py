@@ -14,13 +14,23 @@ class OllamaClient:
         self,
         prompt: str,
         model: str | None = None,
+        response_language: str | None = None,
         timeout_s: float | None = None,
     ) -> str:
+        if response_language:
+            language_instruction = (
+                f"Detected user language: {response_language}. "
+                f"Reply in {response_language} unless explicitly asked to switch languages."
+            )
+        else:
+            language_instruction = "Detect the user language from the latest message and reply in the same language."
+
         payload = {
             "model": model or self.settings.ollama_model,
             "prompt": prompt,
             "system": (
                 "You are ZARA AI, a helpful conversational assistant. "
+                f"{language_instruction} "
                 "Respond in natural complete sentences and avoid one-word answers unless explicitly requested."
             ),
             "stream": False,

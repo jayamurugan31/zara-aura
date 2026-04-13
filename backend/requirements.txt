@@ -12,5 +12,6 @@ soundfile==0.12.1
 faster-whisper==1.0.3
 vaderSentiment==3.3.2
 TTS==0.22.0
+langdetect==1.0.9
 # Optional for scaling memory across instances
 redis==5.2.0

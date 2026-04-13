@@ -13,6 +13,7 @@ export interface BackendAction {
 
 export interface ChatApiResponse {
   text: string;
+  language: string;
   emotion: BackendEmotion;
   audio_features: BackendAudioFeatures;
   action: BackendAction | null;

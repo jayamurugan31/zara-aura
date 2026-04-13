@@ -16,15 +16,25 @@ class OpenRouterClient:
         self,
         text: str,
         history: list[dict[str, str]] | None = None,
+        response_language: str | None = None,
         timeout_s: float | None = None,
     ) -> str:
         if not self.settings.openrouter_api_key:
             raise RuntimeError("OPENROUTER_API_KEY is not configured")
 
+        if response_language:
+            language_instruction = (
+                f"Detected user language: {response_language}. "
+                f"Reply in {response_language} unless the user explicitly asks for another language."
+            )
+        else:
+            language_instruction = "Detect the language of the latest user message and reply in that same language."
+
         system_prompt = (
             "You are ZARA AI, a warm and conversational voice-first assistant. "
             "Answer naturally in clear complete sentences, usually 2-5 sentences unless the user asks for brief output. "
             "Use recent conversation context to keep continuity and reason through follow-up questions. "
+            f"{language_instruction} "
             "Avoid one-word replies except for strict yes/no requests."
         )
 
