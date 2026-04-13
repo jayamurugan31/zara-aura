@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import Orb from "@/components/Orb";
 import MicButton from "@/components/MicButton";
@@ -22,15 +22,33 @@ const subtext: Record<OrbState, string> = {
 
 const Index = () => {
   const [orbState, setOrbState] = useState<OrbState>("idle");
+  const [audioStream, setAudioStream] = useState<MediaStream | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
 
-  const handleMicToggle = useCallback(() => {
+  const handleMicToggle = useCallback(async () => {
     if (orbState === "idle") {
-      setOrbState("listening");
-      setTimeout(() => setOrbState("thinking"), 3000);
-      setTimeout(() => setOrbState("speaking"), 5000);
-      setTimeout(() => setOrbState("idle"), 8000);
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        streamRef.current = stream;
+        setAudioStream(stream);
+        setOrbState("listening");
+
+        setTimeout(() => setOrbState("thinking"), 3000);
+        setTimeout(() => setOrbState("speaking"), 5000);
+        setTimeout(() => {
+          setOrbState("idle");
+          streamRef.current?.getTracks().forEach(t => t.stop());
+          streamRef.current = null;
+          setAudioStream(null);
+        }, 8000);
+      } catch {
+        console.warn("Mic access denied");
+      }
     } else {
       setOrbState("idle");
+      streamRef.current?.getTracks().forEach(t => t.stop());
+      streamRef.current = null;
+      setAudioStream(null);
     }
   }, [orbState]);
 
@@ -40,7 +58,7 @@ const Index = () => {
 
       {/* Orb */}
       <div className="flex-1 flex items-center justify-center">
-        <Orb state={orbState} />
+        <Orb state={orbState} audioStream={audioStream} />
       </div>
 
       {/* Text */}
