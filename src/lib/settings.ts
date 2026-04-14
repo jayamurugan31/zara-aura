@@ -36,6 +36,7 @@ export interface ZaraSettings {
   };
   mode: {
     presence: PresenceMode;
+    flightMode: boolean;
   };
   automation: {
     routines: boolean;
@@ -86,6 +87,7 @@ export const defaultSettings: ZaraSettings = {
   },
   mode: {
     presence: "virtual",
+    flightMode: false,
   },
   automation: {
     routines: true,

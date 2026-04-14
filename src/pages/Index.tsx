@@ -5,7 +5,7 @@ import MicButton from "@/components/MicButton";
 import SettingsPanel from "@/components/SettingsPanel";
 import TopBar from "@/components/TopBar";
 import { defaultSettings, orbPaletteHues, type VoicePersona, type ZaraSettings } from "@/lib/settings";
-import { fetchTtsAudio, sendVoiceChunk, syncBackendMode, type BackendAction, type BackendEmotion } from "@/lib/backend";
+import { fetchTtsAudio, sendVoiceChunk, syncBackendFlightMode, syncBackendMode, type BackendAction, type BackendEmotion } from "@/lib/backend";
 
 type OrbState = "idle" | "listening" | "thinking" | "speaking";
 
@@ -789,6 +789,19 @@ const Index = () => {
     };
   }, [settings.ai.responseMode]);
 
+  useEffect(() => {
+    let active = true;
+    syncBackendFlightMode(settings.mode.flightMode).catch((error) => {
+      if (!active) return;
+      const message = error instanceof Error ? error.message : "Unable to sync Flight Mode";
+      setRuntimeHint(message);
+    });
+
+    return () => {
+      active = false;
+    };
+  }, [settings.mode.flightMode]);
+
   const messages = useMemo(() => {
     if (orbState === "listening") {
       return "I'm listening...";
@@ -893,6 +906,7 @@ const Index = () => {
       <TopBar
         mode={settings.ai.responseMode}
         presence={settings.mode.presence}
+        flightMode={settings.mode.flightMode}
         continuousLoop={settings.ai.continuousLoop}
         onOpenSettings={() => setSettingsOpen(true)}
       />

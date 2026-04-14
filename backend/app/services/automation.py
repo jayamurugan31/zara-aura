@@ -13,6 +13,8 @@ from app.config import Settings
 
 if TYPE_CHECKING:
     from app.services.mcp_service import MCPService
+    from app.services.mode_state import ModeState
+    from app.services.mqtt_flight import MQTTFlightController
 
 
 logger = logging.getLogger(__name__)
@@ -196,16 +198,47 @@ class AutomationEngine:
         r"\b(turn|switch|set|disable)\s+off\s+(the\s+)?engine\b|\bstop\s+(the\s+)?engine\b|\bengine\s+off\b",
         re.IGNORECASE,
     )
+    FLIGHT_LED_ON_RE = re.compile(
+        r"\b(start|turn|switch)\s+(on\s+)?(the\s+)?(light|lights|led|leds)\b|\b(light|lights|led|leds)\s+on\b",
+        re.IGNORECASE,
+    )
+    FLIGHT_LED_OFF_RE = re.compile(
+        r"\b(stop|turn|switch)\s+(off\s+)?(the\s+)?(light|lights|led|leds)\b|\b(light|lights|led|leds)\s+off\b",
+        re.IGNORECASE,
+    )
+    FLIGHT_SERVO_RIGHT_RE = re.compile(r"\b(turn|move)\s+right\b|\bservo\s+right\b", re.IGNORECASE)
+    FLIGHT_SERVO_LEFT_RE = re.compile(r"\b(turn|move)\s+left\b|\bservo\s+left\b", re.IGNORECASE)
+    FLIGHT_THROTTLE_UP_RE = re.compile(
+        r"\b(increase|raise|boost)\s+(the\s+)?(speed|throttle)\b|\b(throttle|speed)\s+up\b",
+        re.IGNORECASE,
+    )
+    FLIGHT_THROTTLE_DOWN_RE = re.compile(
+        r"\b(decrease|reduce|lower)\s+(the\s+)?(speed|throttle)\b|\b(throttle|speed)\s+down\b",
+        re.IGNORECASE,
+    )
+    FLIGHT_EMERGENCY_STOP_RE = re.compile(r"\b(emergency\s+stop|abort|kill\s+switch)\b", re.IGNORECASE)
     YOUTUBE_VIDEO_ID_RE = re.compile(r'"videoId":"(?P<id>[A-Za-z0-9_-]{11})"')
 
-    def __init__(self, settings: Settings, mcp_service: MCPService | None = None) -> None:
+    def __init__(
+        self,
+        settings: Settings,
+        mcp_service: MCPService | None = None,
+        mode_state: ModeState | None = None,
+        flight_controller: MQTTFlightController | None = None,
+    ) -> None:
         self.settings = settings
         self.mcp_service = mcp_service
+        self.mode_state = mode_state
+        self.flight_controller = flight_controller
 
     async def detect_and_execute(self, text: str, language_code: str | None = None) -> dict[str, Any] | None:
         normalized = self._canonicalize_command_text(text)
         if not normalized:
             return None
+
+        flight_result = await self._detect_and_execute_flight_command(normalized)
+        if flight_result is not None:
+            return self._with_language(flight_result, language_code)
 
         if self.ENGINE_ON_RE.search(normalized):
             result = await self._trigger_engine(turn_on=True)
@@ -342,6 +375,74 @@ class AutomationEngine:
                 },
                 language_code,
             )
+
+        return None
+
+    async def _detect_and_execute_flight_command(self, normalized: str) -> dict[str, Any] | None:
+        action = self._match_flight_action(normalized)
+        if not action:
+            return None
+
+        if not self.mode_state:
+            return {
+                "type": action,
+                "action": action,
+                "domain": "flight",
+                "status": "failed",
+                "error": "Flight mode state is unavailable",
+            }
+
+        flight_mode_enabled = await self.mode_state.is_flight_mode_enabled()
+        if not flight_mode_enabled:
+            return {
+                "type": action,
+                "action": action,
+                "domain": "flight",
+                "status": "blocked_flight_mode",
+                "detail": "Flight Mode is OFF. Enable Flight Mode in settings to send hardware commands.",
+            }
+
+        if not self.flight_controller:
+            return {
+                "type": action,
+                "action": action,
+                "domain": "flight",
+                "status": "failed",
+                "error": "MQTT flight controller is unavailable",
+            }
+
+        result = await self.flight_controller.publish_action(action)
+        result.setdefault("domain", "flight")
+        result.setdefault("action", action)
+        return result
+
+    def _match_flight_action(self, normalized: str) -> str | None:
+        if self.FLIGHT_EMERGENCY_STOP_RE.search(normalized):
+            return "emergency_stop"
+
+        if self.FLIGHT_LED_ON_RE.search(normalized):
+            return "led_on"
+
+        if self.FLIGHT_LED_OFF_RE.search(normalized):
+            return "led_off"
+
+        if self.FLIGHT_SERVO_RIGHT_RE.search(normalized):
+            return "servo_right"
+
+        if self.FLIGHT_SERVO_LEFT_RE.search(normalized):
+            return "servo_left"
+
+        if self.ENGINE_ON_RE.search(normalized):
+            return "engine_on"
+
+        if self.ENGINE_OFF_RE.search(normalized):
+            return "engine_off"
+
+        if self.FLIGHT_THROTTLE_UP_RE.search(normalized):
+            return "throttle_up"
+
+        if self.FLIGHT_THROTTLE_DOWN_RE.search(normalized):
+            return "throttle_down"
 
         return None
 

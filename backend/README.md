@@ -25,6 +25,9 @@ FastAPI backend optimized for low-resource servers (2-4 GB RAM) with async routi
 - POST /chat
 - POST /voice
 - POST /mode
+- POST /flight-mode
+- GET /flight-mode
+- GET /flight/status
 - WebSocket /ws/orb
 - GET /health
 
@@ -96,5 +99,18 @@ Supported actions:
 - open youtube
 - search queries
 - get current time/date
+- flight controller commands over MQTT (when Flight Mode is enabled)
 
 Dangerous OS command execution is intentionally not implemented.
+
+## Flight Mode (ESP32 + MQTT)
+
+The backend now supports hardware control via MQTT using a dedicated Flight Mode gate.
+
+- Commands are only published when Flight Mode is ON.
+- Control topic: `zara/flight/control`
+- Status topic: `zara/flight/status`
+
+Full setup guide and payload details:
+
+- See `backend/FLIGHT_MODE_MQTT.md`

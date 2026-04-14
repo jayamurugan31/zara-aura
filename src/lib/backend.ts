@@ -86,6 +86,16 @@ export async function syncBackendMode(mode: ResponseMode): Promise<void> {
   });
 }
 
+export async function syncBackendFlightMode(enabled: boolean): Promise<void> {
+  await requestJson<{ enabled: boolean }>("/flight-mode", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ enabled }),
+  });
+}
+
 export async function sendVoiceChunk(
   audioChunk: Blob,
   mode: ResponseMode,

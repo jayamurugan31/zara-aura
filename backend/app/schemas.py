@@ -54,3 +54,24 @@ class TTSRequest(BaseModel):
 
 class ModeResponse(BaseModel):
     mode: ModeLiteral
+
+
+class FlightModeRequest(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    enabled: bool
+
+
+class FlightModeResponse(BaseModel):
+    enabled: bool
+
+
+class FlightStatusResponse(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    connected: bool
+    broker: str
+    control_topic: str
+    status_topic: str
+    last_status: dict[str, Any] | None = None
+    last_status_at: str | None = None

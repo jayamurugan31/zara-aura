@@ -13,7 +13,19 @@ from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import Response
 
 from app.config import settings
-from app.schemas import AudioFeatures, ChatRequest, ChatResponse, ModeLiteral, ModeRequest, ModeResponse, TTSRequest, VoiceResponse
+from app.schemas import (
+    AudioFeatures,
+    ChatRequest,
+    ChatResponse,
+    FlightModeRequest,
+    FlightModeResponse,
+    FlightStatusResponse,
+    ModeLiteral,
+    ModeRequest,
+    ModeResponse,
+    TTSRequest,
+    VoiceResponse,
+)
 from app.services.ai_router import AIRouterService
 from app.services.audio_features import AudioFeatureResult, AudioFeatureService
 from app.services.automation import AutomationEngine
@@ -22,6 +34,7 @@ from app.services.language_service import LanguageDetectionResult, LanguageServi
 from app.services.memory import MemoryStore
 from app.services.mcp_service import MCPService
 from app.services.mode_state import ModeState
+from app.services.mqtt_flight import MQTTFlightController
 from app.services.ollama_client import OllamaClient
 from app.services.openrouter_client import OpenRouterClient
 from app.services.tts_service import TTSService
@@ -140,6 +153,65 @@ def _is_browser_action(action: dict[str, object] | None) -> bool:
     }
 
 
+def _is_flight_action(action: dict[str, object] | None) -> bool:
+    if not action:
+        return False
+
+    return str(action.get("domain") or "").strip().lower() == "flight"
+
+
+def _build_flight_action_response(action: dict[str, object], language_code: str) -> str:
+    command = str(action.get("action") or action.get("type") or "flight_command").replace("_", " ").strip()
+    status = str(action.get("status") or "planned").strip().lower()
+    detail = str(action.get("detail") or "").strip()
+    error = str(action.get("error") or "").strip()
+
+    if language_code == "hi":
+        if status == "blocked_flight_mode":
+            return "फ्लाइट मोड बंद है। हार्डवेयर कमांड भेजने के लिए सेटिंग्स में फ्लाइट मोड चालू करें।"
+        if status == "executed":
+            return f"ठीक है, {command} कमांड भेज दिया गया है।"
+        if status == "failed":
+            return f"{command} कमांड नहीं भेज सका: {error or 'MQTT कनेक्शन जांचें।'}"
+        return detail or f"{command} कमांड स्थिति: {status}"
+
+    if language_code == "ta":
+        if status == "blocked_flight_mode":
+            return "Flight Mode ஆஃப் நிலையில் உள்ளது. Hardware கட்டளைகளை அனுப்ப Settings-ல் Flight Mode-ஐ இயக்குங்கள்."
+        if status == "executed":
+            return f"சரி, {command} கட்டளை அனுப்பப்பட்டது."
+        if status == "failed":
+            return f"{command} கட்டளையை அனுப்ப முடியவில்லை: {error or 'MQTT இணைப்பை சரிபார்க்கவும்.'}"
+        return detail or f"{command} கட்டளை நிலை: {status}"
+
+    if language_code == "te":
+        if status == "blocked_flight_mode":
+            return "Flight Mode ఆఫ్‌లో ఉంది. Hardware కమాండ్లు పంపడానికి Settings లో Flight Mode ఆన్ చేయండి."
+        if status == "executed":
+            return f"సరే, {command} కమాండ్ పంపించబడింది."
+        if status == "failed":
+            return f"{command} కమాండ్ పంపడం విఫలమైంది: {error or 'MQTT కనెక్షన్‌ను చెక్ చేయండి.'}"
+        return detail or f"{command} కమాండ్ స్థితి: {status}"
+
+    if language_code == "ml":
+        if status == "blocked_flight_mode":
+            return "Flight Mode ഓഫ് ആണ്. Hardware commandകൾ അയയ്ക്കാൻ Settings-ൽ Flight Mode ഓൺ ചെയ്യുക."
+        if status == "executed":
+            return f"ശരി, {command} command അയച്ചു."
+        if status == "failed":
+            return f"{command} command അയയ്ക്കാൻ കഴിഞ്ഞില്ല: {error or 'MQTT കണക്ഷൻ പരിശോധിക്കുക.'}"
+        return detail or f"{command} command status: {status}"
+
+    if status == "blocked_flight_mode":
+        return "Flight Mode is OFF. Enable Flight Mode in settings to send hardware commands."
+    if status == "executed":
+        return f"Okay, {command} command sent to the flight controller."
+    if status == "failed":
+        return f"I could not send the {command} command: {error or 'Please check MQTT connectivity.'}"
+
+    return detail or f"Flight command {command} status: {status}."
+
+
 def _build_browser_action_response(action: dict[str, object], language_code: str) -> str:
     action_type = str(action.get("type") or "").strip().lower()
     query = str(action.get("query") or "").strip()
@@ -241,6 +313,7 @@ def _build_browser_action_response(action: dict[str, object], language_code: str
 class ServiceContainer:
     memory_store: MemoryStore
     mode_state: ModeState
+    flight_controller: MQTTFlightController
     language_service: LanguageService
     mcp_service: MCPService
     audio_feature_service: AudioFeatureService
@@ -256,6 +329,7 @@ async def lifespan(app: FastAPI):
     default_mode: ModeLiteral = (
         settings.default_mode if settings.default_mode in {"online", "smart", "offline"} else "smart"
     )
+    default_flight_mode = settings.flight_mode_default
 
     openrouter_http = httpx.AsyncClient(
         base_url=settings.openrouter_base_url,
@@ -271,15 +345,25 @@ async def lifespan(app: FastAPI):
     openrouter_client = OpenRouterClient(openrouter_http, settings)
     ollama_client = OllamaClient(ollama_http, settings)
     mcp_service = MCPService(settings)
+    flight_controller = MQTTFlightController(settings)
+    mode_state = ModeState(default_mode=default_mode, default_flight_mode=default_flight_mode)
+
+    flight_controller.start()
 
     services = ServiceContainer(
         memory_store=MemoryStore(limit=settings.memory_limit),
-        mode_state=ModeState(default_mode=default_mode),
+        mode_state=mode_state,
+        flight_controller=flight_controller,
         language_service=LanguageService(),
         mcp_service=mcp_service,
         audio_feature_service=AudioFeatureService(),
         emotion_service=EmotionService(),
-        automation_engine=AutomationEngine(settings, mcp_service=mcp_service),
+        automation_engine=AutomationEngine(
+            settings,
+            mcp_service=mcp_service,
+            mode_state=mode_state,
+            flight_controller=flight_controller,
+        ),
         whisper_service=WhisperService(settings),
         tts_service=TTSService(settings),
         ai_router=AIRouterService(
@@ -294,6 +378,7 @@ async def lifespan(app: FastAPI):
     try:
         yield
     finally:
+        services.flight_controller.stop()
         await openrouter_http.aclose()
         await ollama_http.aclose()
 
@@ -331,6 +416,26 @@ async def set_mode(payload: ModeRequest, request: Request) -> ModeResponse:
     return ModeResponse(mode=updated_mode)
 
 
+@app.post("/flight-mode", response_model=FlightModeResponse)
+async def set_flight_mode(payload: FlightModeRequest, request: Request) -> FlightModeResponse:
+    services = get_services(request)
+    enabled = await services.mode_state.set_flight_mode(payload.enabled)
+    return FlightModeResponse(enabled=enabled)
+
+
+@app.get("/flight-mode", response_model=FlightModeResponse)
+async def get_flight_mode(request: Request) -> FlightModeResponse:
+    services = get_services(request)
+    enabled = await services.mode_state.is_flight_mode_enabled()
+    return FlightModeResponse(enabled=enabled)
+
+
+@app.get("/flight/status", response_model=FlightStatusResponse)
+async def get_flight_status(request: Request) -> FlightStatusResponse:
+    services = get_services(request)
+    return FlightStatusResponse.model_validate(services.flight_controller.status_snapshot())
+
+
 @app.post("/tts")
 async def tts(payload: TTSRequest, request: Request) -> Response:
     services = get_services(request)
@@ -356,6 +461,8 @@ async def chat(payload: ChatRequest, background_tasks: BackgroundTasks, request:
 
     if _is_browser_action(action):
         response_text = _build_browser_action_response(action or {}, response_language.code)
+    elif _is_flight_action(action):
+        response_text = _build_flight_action_response(action or {}, response_language.code)
     else:
         response_text, _route = await services.ai_router.route_request(
             text=payload.text,
@@ -441,6 +548,8 @@ async def voice(
 
     if _is_browser_action(action):
         response_text = _build_browser_action_response(action or {}, response_language.code)
+    elif _is_flight_action(action):
+        response_text = _build_flight_action_response(action or {}, response_language.code)
     else:
         response_text, _route = await services.ai_router.route_request(
             text=transcript,

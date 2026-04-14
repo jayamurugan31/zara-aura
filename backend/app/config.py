@@ -76,6 +76,27 @@ class Settings:
     memory_limit: int = _env_int("MEMORY_LIMIT", 12)
 
     automation_execute: bool = _env_bool("AUTOMATION_EXECUTE", False)
+    flight_mode_default: bool = _env_bool("FLIGHT_MODE_DEFAULT", False)
+
+    flight_mqtt_enabled: bool = _env_bool("FLIGHT_MQTT_ENABLED", True)
+    flight_mqtt_host: str = os.getenv("FLIGHT_MQTT_HOST", "127.0.0.1")
+    flight_mqtt_port: int = _env_int("FLIGHT_MQTT_PORT", 1883)
+    flight_mqtt_keepalive_s: int = _env_int("FLIGHT_MQTT_KEEPALIVE_S", 30)
+    flight_mqtt_client_id: str = os.getenv("FLIGHT_MQTT_CLIENT_ID", "zara-backend")
+    flight_mqtt_username: str = os.getenv("FLIGHT_MQTT_USERNAME", "")
+    flight_mqtt_password: str = os.getenv("FLIGHT_MQTT_PASSWORD", "")
+    flight_mqtt_control_topic: str = os.getenv("FLIGHT_MQTT_CONTROL_TOPIC", "zara/flight/control")
+    flight_mqtt_status_topic: str = os.getenv("FLIGHT_MQTT_STATUS_TOPIC", "zara/flight/status")
+    flight_mqtt_qos: int = _env_int("FLIGHT_MQTT_QOS", 1)
+    flight_mqtt_retry_attempts: int = _env_int("FLIGHT_MQTT_RETRY_ATTEMPTS", 3)
+    flight_mqtt_retry_delay_ms: int = _env_int("FLIGHT_MQTT_RETRY_DELAY_MS", 250)
+    flight_mqtt_publish_timeout_s: float = _env_float("FLIGHT_MQTT_PUBLISH_TIMEOUT_S", 1.5)
+
+    flight_servo_left_angle: int = _env_int("FLIGHT_SERVO_LEFT_ANGLE", 60)
+    flight_servo_right_angle: int = _env_int("FLIGHT_SERVO_RIGHT_ANGLE", 120)
+    flight_throttle_step: int = _env_int("FLIGHT_THROTTLE_STEP", 15)
+    flight_throttle_min: int = _env_int("FLIGHT_THROTTLE_MIN", 0)
+    flight_throttle_max: int = _env_int("FLIGHT_THROTTLE_MAX", 255)
 
     mcp_enabled: bool = _env_bool("MCP_ENABLED", False)
     mcp_transport: str = os.getenv("MCP_TRANSPORT", "http")
