@@ -21,6 +21,20 @@ function chooseRecorderMimeType(): string | undefined {
   return preferred.find((mimeType) => MediaRecorder.isTypeSupported(mimeType));
 }
 
+function buildAudioConstraints(micSensitivity: number): MediaTrackConstraints {
+  const normalized = Math.min(1, Math.max(0, micSensitivity / 100));
+  const preferredSampleRate = normalized >= 0.65 ? 24000 : 16000;
+
+  return {
+    channelCount: { ideal: 1 },
+    sampleRate: { ideal: preferredSampleRate },
+    sampleSize: { ideal: 16 },
+    echoCancellation: true,
+    noiseSuppression: true,
+    autoGainControl: true,
+  };
+}
+
 function truncate(text: string, maxLength: number) {
   if (text.length <= maxLength) {
     return text;
@@ -469,7 +483,16 @@ const Index = () => {
       clearAutoStop();
 
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        let stream: MediaStream;
+        try {
+          stream = await navigator.mediaDevices.getUserMedia({
+            audio: buildAudioConstraints(settings.voice.micSensitivity),
+          });
+        } catch {
+          // Retry with broad compatibility when strict constraints are unsupported.
+          stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        }
+
         const mimeType = chooseRecorderMimeType();
         const recorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
 
@@ -517,7 +540,7 @@ const Index = () => {
         releaseAudioStream();
       }
     },
-    [clearAutoStop, clearLoopRestart, releaseAudioStream, stopTtsAudio],
+    [clearAutoStop, clearLoopRestart, releaseAudioStream, settings.voice.micSensitivity, stopTtsAudio],
   );
 
   const playBackendTts = useCallback(async (text: string, languageCode: SupportedLanguageCode): Promise<boolean> => {
