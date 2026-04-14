@@ -3,7 +3,7 @@ services:
     name: zara-backend
     env: python
     rootDir: backend
-    buildCommand: pip install --upgrade pip && pip install -r requirements.txt
+    buildCommand: pip install --upgrade pip && pip install -r requirements-render.txt
     startCommand: gunicorn -c gunicorn_conf.py app.main:app
     healthCheckPath: /health
     autoDeploy: true

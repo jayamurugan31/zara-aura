@@ -69,6 +69,10 @@ All main AI responses follow:
 
 gunicorn -c backend/gunicorn_conf.py app.main:app --chdir backend
 
+Render build command recommendation:
+
+pip install -r backend/requirements-render.txt
+
 ## Docker
 
 Build:

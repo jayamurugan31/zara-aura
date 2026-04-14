@@ -88,7 +88,7 @@ Then redeploy frontend.
    - `VITE_BACKEND_URL=https://<render-backend-domain>`.
 8. CORS allows the exact Vercel production domain.
 9. Render build should use default backend requirements without Coqui TTS:
-   - `backend/requirements.txt` (TTS removed by default for deploy stability).
+   - `backend/requirements-render.txt` (recommended for Render build stability).
    - Optional Coqui install file: `backend/requirements-tts.txt`.
 
 ## What to Configure on ESP32
