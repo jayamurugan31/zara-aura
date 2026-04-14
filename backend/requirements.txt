@@ -12,7 +12,8 @@ librosa==0.10.2.post1
 soundfile==0.12.1
 faster-whisper==1.0.3
 vaderSentiment==3.3.2
-TTS==0.22.0; python_version < "3.12"
+# Optional Coqui TTS dependency (install only when explicitly needed on supported Python versions)
+# TTS==0.22.0
 langdetect==1.0.9
 edge-tts==6.1.13
 gTTS==2.5.3

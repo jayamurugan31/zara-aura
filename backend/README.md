@@ -52,6 +52,10 @@ All main AI responses follow:
 
    pip install -r backend/requirements.txt
 
+  Optional Coqui TTS (only on Python 3.9-3.11):
+
+  pip install -r backend/requirements-tts.txt
+
 3. Copy environment template:
 
    copy backend/.env.example backend/.env
