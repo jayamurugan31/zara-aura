@@ -2,6 +2,7 @@
 #include <WiFiClientSecure.h>
 #include <PubSubClient.h>
 #include <ArduinoJson.h>
+#include <ESP32Servo.h>
 
 #if __has_include(<esp_arduino_version.h>)
 #include <esp_arduino_version.h>
@@ -42,14 +43,38 @@ constexpr uint16_t ESC_START_BOOST_US = 1450;
 constexpr uint16_t ESC_START_BOOST_MS = 350;
 constexpr uint16_t ESC_ARM_DELAY_MS = 2500;
 
+// Control surfaces
+constexpr uint8_t RUDDER_PIN = 18;
+constexpr uint8_t ELEVATOR_PIN = 19;
+constexpr uint8_t AILERON_PIN = 21;
+constexpr int SERVO_CENTER_ANGLE = 90;
+constexpr int RUDDER_RIGHT_ANGLE = 45;
+constexpr int RUDDER_LEFT_ANGLE = 135;
+constexpr int ELEVATOR_UP_ANGLE = 45;
+constexpr int ELEVATOR_DOWN_ANGLE = 135;
+constexpr int AILERON_RIGHT_ANGLE = 45;
+constexpr int AILERON_LEFT_ANGLE = 135;
+constexpr uint16_t CONTROL_SURFACE_HOLD_MS = 800;
+
+// Throttle level bridge (backend uses 0..255 by default).
+constexpr int THROTTLE_MIN_LEVEL = 0;
+constexpr int THROTTLE_MAX_LEVEL = 255;
+constexpr int THROTTLE_STEP_LEVEL = 15;
+constexpr int THROTTLE_DEFAULT_START_LEVEL = 80;
+
 WiFiClient wifiClient;
 WiFiClientSecure secureClient;
 PubSubClient mqttClient;
+Servo rudderServo;
+Servo elevatorServo;
+Servo aileronServo;
 
 bool ledOn = false;
 bool engineOn = false;
 bool enginePwmReady = false;
+bool controlSurfacesReady = false;
 uint16_t enginePulseUs = ESC_STOP_US;
+int throttleLevel = THROTTLE_MIN_LEVEL;
 bool wifiConnectionLogged = false;
 bool mqttConnectionLogged = false;
 char mqttClientId[40] = {0};
@@ -62,7 +87,9 @@ void publishStatus(const char* status) {
   doc["status"] = status;
   doc["led_on"] = ledOn;
   doc["engine_on"] = engineOn;
+  doc["throttle_level"] = throttleLevel;
   doc["engine_signal_us"] = enginePulseUs;
+  doc["control_surfaces_ready"] = controlSurfacesReady;
   doc["uptime_ms"] = millis();
 
   char payload[256];
@@ -110,17 +137,128 @@ void writeEscPulseUs(uint16_t pulseUs) {
 #endif
 }
 
+int clampThrottleLevel(int level) {
+  if (level < THROTTLE_MIN_LEVEL) {
+    return THROTTLE_MIN_LEVEL;
+  }
+  if (level > THROTTLE_MAX_LEVEL) {
+    return THROTTLE_MAX_LEVEL;
+  }
+  return level;
+}
+
+uint16_t throttleLevelToPulseUs(int level) {
+  const int clampedLevel = clampThrottleLevel(level);
+  return static_cast<uint16_t>(map(clampedLevel, THROTTLE_MIN_LEVEL, THROTTLE_MAX_LEVEL, ESC_MIN_US, ESC_MAX_US));
+}
+
+int pulseUsToThrottleLevel(uint16_t pulseUs) {
+  const uint16_t clampedPulseUs = clampEscPulseUs(pulseUs);
+  return clampThrottleLevel(map(clampedPulseUs, ESC_MIN_US, ESC_MAX_US, THROTTLE_MIN_LEVEL, THROTTLE_MAX_LEVEL));
+}
+
+int clampServoAngle(int angle) {
+  if (angle < 0) {
+    return 0;
+  }
+  if (angle > 180) {
+    return 180;
+  }
+  return angle;
+}
+
+void centerControlSurfaces() {
+  if (!controlSurfacesReady) {
+    return;
+  }
+
+  rudderServo.write(SERVO_CENTER_ANGLE);
+  elevatorServo.write(SERVO_CENTER_ANGLE);
+  aileronServo.write(SERVO_CENTER_ANGLE);
+}
+
+void moveSurface(Servo& surface, int targetAngle) {
+  if (!controlSurfacesReady) {
+    return;
+  }
+
+  surface.write(clampServoAngle(targetAngle));
+  delay(CONTROL_SURFACE_HOLD_MS);
+  surface.write(SERVO_CENTER_ANGLE);
+}
+
+void turnRight() {
+  moveSurface(rudderServo, RUDDER_RIGHT_ANGLE);
+}
+
+void turnLeft() {
+  moveSurface(rudderServo, RUDDER_LEFT_ANGLE);
+}
+
+void upward() {
+  moveSurface(elevatorServo, ELEVATOR_UP_ANGLE);
+}
+
+void downward() {
+  moveSurface(elevatorServo, ELEVATOR_DOWN_ANGLE);
+}
+
+void rightRoll() {
+  moveSurface(aileronServo, AILERON_RIGHT_ANGLE);
+}
+
+void leftRoll() {
+  moveSurface(aileronServo, AILERON_LEFT_ANGLE);
+}
+
+void controlCheck() {
+  turnRight();
+  turnLeft();
+  upward();
+  downward();
+  rightRoll();
+  leftRoll();
+}
+
+void initControlSurfaces() {
+  rudderServo.setPeriodHertz(50);
+  elevatorServo.setPeriodHertz(50);
+  aileronServo.setPeriodHertz(50);
+
+  rudderServo.attach(RUDDER_PIN, 500, 2400);
+  elevatorServo.attach(ELEVATOR_PIN, 500, 2400);
+  aileronServo.attach(AILERON_PIN, 500, 2400);
+
+  controlSurfacesReady = rudderServo.attached() && elevatorServo.attached() && aileronServo.attached();
+  if (!controlSurfacesReady) {
+    Serial.println("[SERVO] Failed to initialize one or more control surfaces.");
+    return;
+  }
+
+  centerControlSurfaces();
+  Serial.println("[SERVO] Control surfaces ready.");
+}
+
 void setEngineState(bool enabled, int requestedPulseUs = -1) {
   if (!enabled) {
     engineOn = false;
+    throttleLevel = THROTTLE_MIN_LEVEL;
     enginePulseUs = ESC_STOP_US;
     writeEscPulseUs(enginePulseUs);
     return;
   }
 
+  int effectiveThrottleLevel = throttleLevel;
   uint16_t targetPulseUs = ESC_SPIN_US;
+
   if (requestedPulseUs >= static_cast<int>(ESC_MIN_US) && requestedPulseUs <= static_cast<int>(ESC_MAX_US)) {
     targetPulseUs = static_cast<uint16_t>(requestedPulseUs);
+    effectiveThrottleLevel = pulseUsToThrottleLevel(targetPulseUs);
+  } else {
+    if (effectiveThrottleLevel <= THROTTLE_MIN_LEVEL) {
+      effectiveThrottleLevel = THROTTLE_DEFAULT_START_LEVEL;
+    }
+    targetPulseUs = throttleLevelToPulseUs(effectiveThrottleLevel);
   }
 
   // Give a short startup boost so BLDC can overcome static friction.
@@ -128,55 +266,136 @@ void setEngineState(bool enabled, int requestedPulseUs = -1) {
   writeEscPulseUs(boostPulseUs);
   delay(ESC_START_BOOST_MS);
 
+  throttleLevel = clampThrottleLevel(effectiveThrottleLevel);
   engineOn = true;
   enginePulseUs = targetPulseUs;
   writeEscPulseUs(enginePulseUs);
 }
 
+void setThrottleLevel(int level, bool autoStart = true) {
+  throttleLevel = clampThrottleLevel(level);
+
+  if (throttleLevel <= THROTTLE_MIN_LEVEL) {
+    if (engineOn) {
+      setEngineState(false);
+    }
+    return;
+  }
+
+  if (!engineOn && autoStart) {
+    setEngineState(true);
+    return;
+  }
+
+  if (engineOn) {
+    enginePulseUs = throttleLevelToPulseUs(throttleLevel);
+    writeEscPulseUs(enginePulseUs);
+  }
+}
+
+void increaseThrottle(int requestedLevel = -1) {
+  if (requestedLevel >= THROTTLE_MIN_LEVEL) {
+    setThrottleLevel(requestedLevel);
+    return;
+  }
+
+  setThrottleLevel(throttleLevel + THROTTLE_STEP_LEVEL);
+}
+
+void decreaseThrottle(int requestedLevel = -1) {
+  if (requestedLevel >= THROTTLE_MIN_LEVEL) {
+    setThrottleLevel(requestedLevel, false);
+    return;
+  }
+
+  setThrottleLevel(throttleLevel - THROTTLE_STEP_LEVEL, false);
+}
+
 void applyEngineFailsafe(const char* reason) {
   if (!engineOn) {
+    centerControlSurfaces();
     return;
   }
 
   setEngineState(false);
+  centerControlSurfaces();
   Serial.print("[ENGINE] FAILSAFE OFF: ");
   Serial.println(reason);
 }
 
-bool isTurnOnLightsCommand(const char* raw) {
-  String cmd = String(raw);
+String normalizeCommand(const char* raw) {
+  String cmd = String(raw ? raw : "");
   cmd.trim();
   cmd.toLowerCase();
+  while (cmd.indexOf("  ") >= 0) {
+    cmd.replace("  ", " ");
+  }
+  return cmd;
+}
+
+bool isTurnOnLightsCommand(const String& cmd) {
   return cmd == "turn on lights" || cmd == "turn on light" || cmd == "start light";
 }
 
-bool isTurnOffLightsCommand(const char* raw) {
-  String cmd = String(raw);
-  cmd.trim();
-  cmd.toLowerCase();
+bool isTurnOffLightsCommand(const String& cmd) {
   return cmd == "turn off lights" || cmd == "turn off light" || cmd == "stop light";
 }
 
-bool isTurnOnEngineCommand(const char* raw) {
-  String cmd = String(raw);
-  cmd.trim();
-  cmd.toLowerCase();
+bool isTurnOnEngineCommand(const String& cmd) {
   return cmd == "turn on engine" || cmd == "start engine" || cmd == "engine on" || cmd == "turn on motor";
 }
 
-bool isTurnOffEngineCommand(const char* raw) {
-  String cmd = String(raw);
-  cmd.trim();
-  cmd.toLowerCase();
+bool isTurnOffEngineCommand(const String& cmd) {
   return cmd == "turn off engine" || cmd == "stop engine" || cmd == "engine off" || cmd == "turn off motor";
+}
+
+bool isTurnRightCommand(const String& cmd) {
+  return cmd == "turn right" || cmd == "move right" || cmd == "servo right";
+}
+
+bool isTurnLeftCommand(const String& cmd) {
+  return cmd == "turn left" || cmd == "move left" || cmd == "servo left";
+}
+
+bool isUpwardCommand(const String& cmd) {
+  return cmd == "upward" || cmd == "move up" || cmd == "elevator up" || cmd == "pitch up";
+}
+
+bool isDownwardCommand(const String& cmd) {
+  return cmd == "downward" || cmd == "move down" || cmd == "elevator down" || cmd == "pitch down";
+}
+
+bool isRightRollCommand(const String& cmd) {
+  return cmd == "right roll" || cmd == "roll right" || cmd == "bank right" || cmd == "aileron right";
+}
+
+bool isLeftRollCommand(const String& cmd) {
+  return cmd == "left roll" || cmd == "roll left" || cmd == "bank left" || cmd == "aileron left";
+}
+
+bool isControlCheckCommand(const String& cmd) {
+  return cmd == "control check" || cmd == "flight check" || cmd == "preflight check" || cmd == "system check";
+}
+
+bool isIncreaseThrottleCommand(const String& cmd) {
+  return cmd == "increase throttle" || cmd == "throttle up" || cmd == "increase speed";
+}
+
+bool isDecreaseThrottleCommand(const String& cmd) {
+  return cmd == "decrease throttle" || cmd == "throttle down" || cmd == "decrease speed";
+}
+
+bool isEmergencyStopCommand(const String& cmd) {
+  return cmd == "emergency stop" || cmd == "abort" || cmd == "kill switch";
 }
 
 void handleControlMessage(const JsonDocument& doc) {
   const char* action = doc["action"] | "";
   const char* command = doc["command"] | doc["text"] | "";
   const int value = doc["value"] | -1;
+  const String normalizedCommand = normalizeCommand(command);
 
-  if (strcmp(action, "led_on") == 0 || strcmp(action, "turn_on_lights") == 0 || isTurnOnLightsCommand(command)) {
+  if (strcmp(action, "led_on") == 0 || strcmp(action, "turn_on_lights") == 0 || isTurnOnLightsCommand(normalizedCommand)) {
     ledOn = true;
     digitalWrite(LED_BUILTIN, HIGH);
     Serial.println("[LED] ON (voice command: turn on lights)");
@@ -184,7 +403,7 @@ void handleControlMessage(const JsonDocument& doc) {
     return;
   }
 
-  if (strcmp(action, "led_off") == 0 || strcmp(action, "turn_off_lights") == 0 || isTurnOffLightsCommand(command)) {
+  if (strcmp(action, "led_off") == 0 || strcmp(action, "turn_off_lights") == 0 || isTurnOffLightsCommand(normalizedCommand)) {
     ledOn = false;
     digitalWrite(LED_BUILTIN, LOW);
     Serial.println("[LED] OFF (voice command: turn off lights)");
@@ -192,7 +411,7 @@ void handleControlMessage(const JsonDocument& doc) {
     return;
   }
 
-  if (strcmp(action, "engine_on") == 0 || strcmp(action, "turn_on_engine") == 0 || isTurnOnEngineCommand(command)) {
+  if (strcmp(action, "engine_on") == 0 || strcmp(action, "turn_on_engine") == 0 || isTurnOnEngineCommand(normalizedCommand)) {
     setEngineState(true, value);
     Serial.println("[ENGINE] ON (voice command: turn on engine)");
     Serial.print("[ENGINE] Pulse(us): ");
@@ -201,10 +420,89 @@ void handleControlMessage(const JsonDocument& doc) {
     return;
   }
 
-  if (strcmp(action, "engine_off") == 0 || strcmp(action, "turn_off_engine") == 0 || isTurnOffEngineCommand(command)) {
+  if (strcmp(action, "engine_off") == 0 || strcmp(action, "turn_off_engine") == 0 || isTurnOffEngineCommand(normalizedCommand)) {
     setEngineState(false);
     Serial.println("[ENGINE] OFF (voice command: turn off engine)");
     publishStatus("engine_off");
+    return;
+  }
+
+  if (strcmp(action, "throttle_up") == 0 || strcmp(action, "increase_throttle") == 0 || isIncreaseThrottleCommand(normalizedCommand)) {
+    if (value >= THROTTLE_MIN_LEVEL) {
+      increaseThrottle(value);
+    } else {
+      increaseThrottle();
+    }
+    Serial.println("[ENGINE] THROTTLE UP");
+    publishStatus("throttle_up");
+    return;
+  }
+
+  if (strcmp(action, "throttle_down") == 0 || strcmp(action, "decrease_throttle") == 0 || isDecreaseThrottleCommand(normalizedCommand)) {
+    if (value >= THROTTLE_MIN_LEVEL) {
+      decreaseThrottle(value);
+    } else {
+      decreaseThrottle();
+    }
+    Serial.println("[ENGINE] THROTTLE DOWN");
+    publishStatus("throttle_down");
+    return;
+  }
+
+  if (strcmp(action, "servo_right") == 0 || strcmp(action, "turn_right") == 0 || isTurnRightCommand(normalizedCommand)) {
+    turnRight();
+    Serial.println("[SERVO] RUDDER RIGHT");
+    publishStatus("servo_right");
+    return;
+  }
+
+  if (strcmp(action, "servo_left") == 0 || strcmp(action, "turn_left") == 0 || isTurnLeftCommand(normalizedCommand)) {
+    turnLeft();
+    Serial.println("[SERVO] RUDDER LEFT");
+    publishStatus("servo_left");
+    return;
+  }
+
+  if (strcmp(action, "elevator_up") == 0 || strcmp(action, "upward") == 0 || isUpwardCommand(normalizedCommand)) {
+    upward();
+    Serial.println("[SERVO] ELEVATOR UP");
+    publishStatus("elevator_up");
+    return;
+  }
+
+  if (strcmp(action, "elevator_down") == 0 || strcmp(action, "downward") == 0 || isDownwardCommand(normalizedCommand)) {
+    downward();
+    Serial.println("[SERVO] ELEVATOR DOWN");
+    publishStatus("elevator_down");
+    return;
+  }
+
+  if (strcmp(action, "roll_right") == 0 || strcmp(action, "right_roll") == 0 || isRightRollCommand(normalizedCommand)) {
+    rightRoll();
+    Serial.println("[SERVO] ROLL RIGHT");
+    publishStatus("roll_right");
+    return;
+  }
+
+  if (strcmp(action, "roll_left") == 0 || strcmp(action, "left_roll") == 0 || isLeftRollCommand(normalizedCommand)) {
+    leftRoll();
+    Serial.println("[SERVO] ROLL LEFT");
+    publishStatus("roll_left");
+    return;
+  }
+
+  if (strcmp(action, "control_check") == 0 || isControlCheckCommand(normalizedCommand)) {
+    controlCheck();
+    Serial.println("[SERVO] CONTROL CHECK COMPLETE");
+    publishStatus("control_check");
+    return;
+  }
+
+  if (strcmp(action, "emergency_stop") == 0 || isEmergencyStopCommand(normalizedCommand)) {
+    setEngineState(false);
+    centerControlSurfaces();
+    Serial.println("[SAFETY] EMERGENCY STOP");
+    publishStatus("emergency_stop");
     return;
   }
 
@@ -313,7 +611,7 @@ void ensureMqttConnected() {
 void setup() {
   Serial.begin(115200);
   delay(200);
-  Serial.println("[BOOT] LED voice controller starting...");
+  Serial.println("[BOOT] Flight controller starting...");
 
   const uint64_t chipId = ESP.getEfuseMac();
   snprintf(mqttClientId, sizeof(mqttClientId), "zara-esp32-%04X", static_cast<unsigned int>(chipId & 0xFFFF));
@@ -328,6 +626,9 @@ void setup() {
   if (!enginePwmReady) {
     Serial.println("[ENGINE] PWM init failed.");
   }
+
+  initControlSurfaces();
+
   setEngineState(false);
   Serial.println("[ENGINE] Arming ESC...");
   delay(ESC_ARM_DELAY_MS);

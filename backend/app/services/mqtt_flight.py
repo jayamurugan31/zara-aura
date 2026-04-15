@@ -25,6 +25,11 @@ class MQTTFlightController:
         "led_off",
         "servo_right",
         "servo_left",
+        "elevator_up",
+        "elevator_down",
+        "roll_right",
+        "roll_left",
+        "control_check",
         "engine_on",
         "engine_off",
         "throttle_up",
@@ -208,6 +213,21 @@ class MQTTFlightController:
             if action == "servo_left":
                 angle = self._clamp_servo(value if value is not None else self.settings.flight_servo_left_angle)
                 return {"action": "servo_left", "value": angle}
+
+            if action == "elevator_up":
+                return {"action": "elevator_up"}
+
+            if action == "elevator_down":
+                return {"action": "elevator_down"}
+
+            if action == "roll_right":
+                return {"action": "roll_right"}
+
+            if action == "roll_left":
+                return {"action": "roll_left"}
+
+            if action == "control_check":
+                return {"action": "control_check"}
 
             if action == "engine_on":
                 self._engine_enabled = True

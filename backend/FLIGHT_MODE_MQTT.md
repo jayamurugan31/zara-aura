@@ -27,8 +27,15 @@ Voice Command -> ZARA AI -> FastAPI Automation Engine -> MQTT Broker -> ESP32 ->
 - `stop light` -> `led_off`
 - `turn right` -> `servo_right` (value defaults to 120)
 - `turn left` -> `servo_left` (value defaults to 60)
+- `upward` -> `elevator_up`
+- `downward` -> `elevator_down`
+- `right roll` -> `roll_right`
+- `left roll` -> `roll_left`
+- `control check` -> `control_check`
 - `start engine` -> `engine_on`
 - `stop engine` -> `engine_off`
+- `increase throttle` -> `throttle_up`
+- `decrease throttle` -> `throttle_down`
 - `increase speed` -> `throttle_up`
 - `decrease speed` -> `throttle_down`
 - `emergency stop` -> `emergency_stop`

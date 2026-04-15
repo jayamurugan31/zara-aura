@@ -231,6 +231,26 @@ class AutomationEngine:
     )
     FLIGHT_SERVO_RIGHT_RE = re.compile(r"\b(turn|move)\s+right\b|\bservo\s+right\b", re.IGNORECASE)
     FLIGHT_SERVO_LEFT_RE = re.compile(r"\b(turn|move)\s+left\b|\bservo\s+left\b", re.IGNORECASE)
+    FLIGHT_ELEVATOR_UP_RE = re.compile(
+        r"\b(upward|elevator\s+up|move\s+up|pitch\s+up|nose\s+up)\b",
+        re.IGNORECASE,
+    )
+    FLIGHT_ELEVATOR_DOWN_RE = re.compile(
+        r"\b(downward|elevator\s+down|move\s+down|pitch\s+down|nose\s+down)\b",
+        re.IGNORECASE,
+    )
+    FLIGHT_ROLL_RIGHT_RE = re.compile(
+        r"\b(right\s+roll|roll\s+right|bank\s+right|aileron\s+right)\b",
+        re.IGNORECASE,
+    )
+    FLIGHT_ROLL_LEFT_RE = re.compile(
+        r"\b(left\s+roll|roll\s+left|bank\s+left|aileron\s+left)\b",
+        re.IGNORECASE,
+    )
+    FLIGHT_CONTROL_CHECK_RE = re.compile(
+        r"\b(control\s+check|flight\s+check|preflight\s+check|system\s+check)\b",
+        re.IGNORECASE,
+    )
     FLIGHT_THROTTLE_UP_RE = re.compile(
         r"\b(increase|raise|boost)\s+(the\s+)?(speed|throttle)\b|\b(throttle|speed)\s+up\b",
         re.IGNORECASE,
@@ -454,6 +474,21 @@ class AutomationEngine:
 
         if self.FLIGHT_SERVO_LEFT_RE.search(normalized):
             return "servo_left"
+
+        if self.FLIGHT_ELEVATOR_UP_RE.search(normalized):
+            return "elevator_up"
+
+        if self.FLIGHT_ELEVATOR_DOWN_RE.search(normalized):
+            return "elevator_down"
+
+        if self.FLIGHT_ROLL_RIGHT_RE.search(normalized):
+            return "roll_right"
+
+        if self.FLIGHT_ROLL_LEFT_RE.search(normalized):
+            return "roll_left"
+
+        if self.FLIGHT_CONTROL_CHECK_RE.search(normalized):
+            return "control_check"
 
         if self.ENGINE_ON_RE.search(normalized):
             return "engine_on"
